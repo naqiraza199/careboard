@@ -2,15 +2,23 @@
 
 namespace App\Filament\Pages;
 
+use App\Mail\ShiftAssignment;
+use App\Models\BillingReport;
 use App\Models\Client;
 use App\Models\Company;
+use App\Models\Event;
 use App\Models\PayGroup;
 use App\Models\PriceBook;
+use App\Models\PriceBookDetail;
+use App\Models\Shift;
 use App\Models\ShiftType;
 use App\Models\StaffProfile;
 use App\Models\Team;
+use App\Models\Timesheet;
+use App\Models\TimesheetReport;
 use App\Models\User;
-use Filament\Forms;
+use Carbon\Carbon;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Grid;
@@ -21,44 +29,29 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Concerns\InteractsWithForms;
-use Filament\Forms\Contracts\HasForms;
+use Filament\Forms\Components\View;
+use Filament\Forms\Form;
+use Filament\Forms\Get;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\HtmlString;
-use Spatie\Permission\Traits\HasRoles;
-use Filament\Forms\Form;
-use App\Models\Shift;
-use Filament\Notifications\Notification;
-use Filament\Forms\Get;
-use App\Models\Event;
-use App\Models\BillingReport;
-use Carbon\Carbon;
-use App\Models\PriceBookDetail;
-use App\Models\TimesheetReport;
-use App\Models\Timesheet;
-use Filament\Facades\Filament;
-use Filament\Forms\Components\View;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\ShiftAssignment;
-
-use Carbon\CarbonInterval;
-
+use Illuminate\Support\HtmlString;
 
 class Schedular extends Page
 {
     protected static ?string $navigationIcon = 'heroicon-s-calendar';
+
     protected static string $view = 'filament.pages.schedular';
+
     protected static ?string $title = 'Schedular';
 
+    public static function canAccess(): bool
+    {
+        $user = Filament::auth()->user();
 
-        public static function canAccess(): bool
-        {
-            $user = Filament::auth()->user();
-
-            return $user && $user->hasPermissionTo('manage-schedulers');
-        }
+        return $user && $user->hasPermissionTo('manage-schedulers');
+    }
 
     public ?array $data = [
         'add_to_job_board' => null,
@@ -75,22 +68,32 @@ class Schedular extends Page
         ],
     ];
 
-public $users; // List of users for the calendar
-public $shifts;
-public $clientNames;
-public $shiftTypeNames;
-public $display_name;
-public $shiftTypes;
-public bool $isTaskModalOpen = false;
+    public $users; // List of users for the calendar
 
-public bool $showTaskModal = false;
-public ?int $shiftId = null;
-public ?string $selectedDate = null;
+    public $shifts;
 
-protected $listeners = [
-    'open-task-modal'   => 'openTaskModal',
-    'close-task-modal'  => 'closeTaskModal',
-];
+    public $clientNames;
+
+    public $shiftTypeNames;
+
+    public $display_name;
+
+    public $shiftTypes;
+
+    public $publicHolidays = [];
+
+    public bool $isTaskModalOpen = false;
+
+    public bool $showTaskModal = false;
+
+    public ?int $shiftId = null;
+
+    public ?string $selectedDate = null;
+
+    protected $listeners = [
+        'open-task-modal' => 'openTaskModal',
+        'close-task-modal' => 'closeTaskModal',
+    ];
 
     public function openTaskModal($params = [])
     {
@@ -112,6 +115,7 @@ protected $listeners = [
     {
         $this->isTaskModalOpen = false;
     }
+
     public function loadShiftDetails()
     {
         $this->dispatch('show-shift-details', [
@@ -120,203 +124,208 @@ protected $listeners = [
         ]);
     }
 
+    public function mount()
+    {
+        $authUser = Auth::user();
+        $companyId = Company::where('user_id', $authUser->id)->value('id');
 
-
-public function mount()
-{
-    $authUser = Auth::user();
-    $companyId = Company::where('user_id', $authUser->id)->value('id');
-
-    if (!$companyId) {
-        $this->users = [];
-    } else {
-        $staffUserIds = StaffProfile::where('company_id', $companyId)
-            ->where('is_archive', 'Unarchive')
-            ->pluck('user_id');
-
-        $usersQuery = User::whereIn('id', $staffUserIds)->role('staff');
-
-        // Determine users based on permissions
-        if ($authUser->hasPermissionTo('all-schedulers')) {
-            // Fetch all staff users for 'all-schedulers' permission
-            $allUsers = $usersQuery->get()->pluck('name', 'id')->toArray();
-            if (!array_key_exists($authUser->id, $allUsers)) {
-                $allUsers[$authUser->id] = $authUser->name;
-            }
-            $this->users = $allUsers;
-        } elseif ($authUser->hasPermissionTo('my-schedulers')) {
-            // Only include authenticated user for 'my-schedulers' permission
-            $this->users = [$authUser->id => $authUser->name];
-        } else {
-            // No relevant permissions, set empty users array
+        if (! $companyId) {
             $this->users = [];
-        }
-    }
+        } else {
+            $staffUserIds = StaffProfile::where('company_id', $companyId)
+                ->where('is_archive', 'Unarchive')
+                ->pluck('user_id');
 
-    // Fetch shifts filtered by company_id and permissions
-    $shiftsQuery = Shift::where('company_id', $companyId);
+            $usersQuery = User::whereIn('id', $staffUserIds)->role('staff');
 
-    // Check permissions
-    if ($authUser->hasPermissionTo('all-schedulers')) {
-        // User has 'all-schedulers' permission, fetch all company shifts
-        $this->shifts = $shiftsQuery->get();
-    } elseif ($authUser->hasPermissionTo('my-schedulers')) {
-        // User has 'my-schedulers' permission, fetch only their shifts
-        $this->shifts = $shiftsQuery
-            ->where(function ($query) use ($authUser) {
-                // Handle simple shifts: check carer_section->user_id
-                $query->whereRaw('JSON_EXTRACT(carer_section, "$.user_id") = ?', [$authUser->id])
-                      // Handle advanced shifts: check if user_id array contains auth user ID
-                      ->orWhereRaw('JSON_CONTAINS(JSON_EXTRACT(carer_section, "$.user_id"), ?)', [json_encode($authUser->id)]);
-            })
-            ->get();
-    } else {
-        // No relevant permissions, return empty shifts
-        $this->shifts = collect([]);
-    }
-
-    $this->shifts = $this->shifts
-        ->map(function ($shift) {
-            $timeAndLocation = is_string($shift->time_and_location)
-                ? json_decode($shift->time_and_location, true)
-                : ($shift->time_and_location ?? []);
-
-            $clientSection = is_string($shift->client_section)
-                ? json_decode($shift->client_section, true)
-                : ($shift->client_section ?? []);
-
-            $shiftSection = is_string($shift->shift_section)
-                ? json_decode($shift->shift_section, true)
-                : ($shift->shift_section ?? []);
-
-            $carerSection = is_string($shift->carer_section)
-                ? json_decode($shift->carer_section, true)
-                : ($shift->carer_section ?? []);
-
-            // Check if advanced shift is split (same client has multiple times)
-            $is_split = false;
-            if ($shift->is_advanced_shift && isset($clientSection['client_details'])) {
-                $clientCounts = [];
-                foreach ($clientSection['client_details'] as $detail) {
-                    $cid = $detail['client_id'] ?? null;
-                    if ($cid) {
-                        $clientCounts[$cid] = ($clientCounts[$cid] ?? 0) + 1;
-                    }
+            // Determine users based on permissions
+            if ($authUser->hasPermissionTo('all-schedulers')) {
+                // Fetch all staff users for 'all-schedulers' permission
+                $allUsers = $usersQuery->get()->pluck('name', 'id')->toArray();
+                if (! array_key_exists($authUser->id, $allUsers)) {
+                    $allUsers[$authUser->id] = $authUser->name;
                 }
-                $is_split = !empty($clientCounts) && max($clientCounts) > 1;
-            }
-
-            // Common fields for all shifts
-            $base = [
-                'id' => $shift->id,
-                'start_date' => $timeAndLocation['start_date'] ?? null,
-                'end_date' => $timeAndLocation['end_date'] ?? null,
-                'start_time' => $timeAndLocation['start_time'] ?? null,
-                'end_time' => $timeAndLocation['end_time'] ?? null,
-                'repeat' => $timeAndLocation['repeat'] ?? false,
-                'recurrance' => $timeAndLocation['recurrance'] ?? 'None',
-                'repeat_every_daily' => $timeAndLocation['repeat_every_daily'] ?? null,
-                'repeat_every_weekly' => $timeAndLocation['repeat_every_weekly'] ?? null,
-                'repeat_every_monthly' => $timeAndLocation['repeat_every_monthly'] ?? null,
-                'occurs_on_monthly' => $timeAndLocation['occurs_on_monthly'] ?? null,
-                'occurs_on_weekly' => $timeAndLocation['occurs_on_weekly'] ?? [],
-                'shift_type_id' => $shiftSection['shift_type_id'] ?? null,
-                'add_to_job_board' => (bool) $shift->add_to_job_board,
-                'is_advanced_shift' => (bool) $shift->is_advanced_shift,
-                'is_vacant' => (int) $shift->is_vacant,
-                'is_cancelled' => (bool) $shift->is_cancelled,
-                'is_approved' => (int) $shift->is_approved,
-                'status' => $shift->status ?? 'Unknown',
-                'is_split' => $is_split,
-                'series_uuid' => $shift->series_uuid ?? null,
-                'repeat_tooltip' => $shift->repeat_tooltip ?? '',
-                'is_sleepover' => $this->isSleepoverShift($shiftSection['shift_type_id'] ?? null),
-            ];
-
-            // Handle shifts based on is_advanced_shift
-            if (!$shift->is_advanced_shift) {
-                // Simple shift: single client_id and user_id
-                $base['client_id'] = $clientSection['client_id'] ?? null;
-                $base['user_id'] = $carerSection['user_id'] ?? null;
-                return [$base];
-            }
-
-            // Advanced shift: handle multiple clients from client_section
-            $clientIds = $clientSection['client_id'] ?? [];
-            $clientIds = is_array($clientIds) ? $clientIds : [$clientIds];
-            $userIds = $carerSection['user_id'] ?? [];
-            $userIds = is_array($userIds) ? $userIds : [$userIds];
-
-            $records = [];
-            if (empty($clientIds)) {
-                // No clients, create a single record with clientIds
-                $records[] = [
-                    ...$base,
-                    'clientIds' => [],
-                    'user_id' => $userIds[0] ?? null,
-                ];
-            } elseif ($shift->is_vacant) {
-                // Vacant advanced shift: one record with all client IDs
-                $records[] = [
-                    ...$base,
-                    'clientIds' => $clientIds,
-                    'user_id' => null,
-                ];
+                $this->users = $allUsers;
+            } elseif ($authUser->hasPermissionTo('my-schedulers')) {
+                // Only include authenticated user for 'my-schedulers' permission
+                $this->users = [$authUser->id => $authUser->name];
             } else {
-                // Non-vacant advanced shift: one record per user, with all client IDs
-                foreach ($userIds as $userId) {
+                // No relevant permissions, set empty users array
+                $this->users = [];
+            }
+        }
+
+        // Fetch shifts filtered by company_id and permissions
+        $shiftsQuery = Shift::where('company_id', $companyId);
+
+        // Check permissions
+        if ($authUser->hasPermissionTo('all-schedulers')) {
+            // User has 'all-schedulers' permission, fetch all company shifts
+            $this->shifts = $shiftsQuery->get();
+        } elseif ($authUser->hasPermissionTo('my-schedulers')) {
+            // User has 'my-schedulers' permission, fetch only their shifts
+            $this->shifts = $shiftsQuery
+                ->where(function ($query) use ($authUser) {
+                    // Handle simple shifts: check carer_section->user_id
+                    $query->whereRaw('JSON_EXTRACT(carer_section, "$.user_id") = ?', [$authUser->id])
+                          // Handle advanced shifts: check if user_id array contains auth user ID
+                        ->orWhereRaw('JSON_CONTAINS(JSON_EXTRACT(carer_section, "$.user_id"), ?)', [json_encode($authUser->id)]);
+                })
+                ->get();
+        } else {
+            // No relevant permissions, return empty shifts
+            $this->shifts = collect([]);
+        }
+
+        $this->shifts = $this->shifts
+            ->map(function ($shift) {
+                $timeAndLocation = is_string($shift->time_and_location)
+                    ? json_decode($shift->time_and_location, true)
+                    : ($shift->time_and_location ?? []);
+
+                $clientSection = is_string($shift->client_section)
+                    ? json_decode($shift->client_section, true)
+                    : ($shift->client_section ?? []);
+
+                $shiftSection = is_string($shift->shift_section)
+                    ? json_decode($shift->shift_section, true)
+                    : ($shift->shift_section ?? []);
+
+                $carerSection = is_string($shift->carer_section)
+                    ? json_decode($shift->carer_section, true)
+                    : ($shift->carer_section ?? []);
+
+                // Check if advanced shift is split (same client has multiple times)
+                $is_split = false;
+                if ($shift->is_advanced_shift && isset($clientSection['client_details'])) {
+                    $clientCounts = [];
+                    foreach ($clientSection['client_details'] as $detail) {
+                        $cid = $detail['client_id'] ?? null;
+                        if ($cid) {
+                            $clientCounts[$cid] = ($clientCounts[$cid] ?? 0) + 1;
+                        }
+                    }
+                    $is_split = ! empty($clientCounts) && max($clientCounts) > 1;
+                }
+
+                // Common fields for all shifts
+                $base = [
+                    'id' => $shift->id,
+                    'start_date' => $timeAndLocation['start_date'] ?? null,
+                    'end_date' => $timeAndLocation['end_date'] ?? null,
+                    'start_time' => $timeAndLocation['start_time'] ?? null,
+                    'end_time' => $timeAndLocation['end_time'] ?? null,
+                    'repeat' => $timeAndLocation['repeat'] ?? false,
+                    'recurrance' => $timeAndLocation['recurrance'] ?? 'None',
+                    'repeat_every_daily' => $timeAndLocation['repeat_every_daily'] ?? null,
+                    'repeat_every_weekly' => $timeAndLocation['repeat_every_weekly'] ?? null,
+                    'repeat_every_monthly' => $timeAndLocation['repeat_every_monthly'] ?? null,
+                    'occurs_on_monthly' => $timeAndLocation['occurs_on_monthly'] ?? null,
+                    'occurs_on_weekly' => $timeAndLocation['occurs_on_weekly'] ?? [],
+                    'shift_type_id' => $shiftSection['shift_type_id'] ?? null,
+                    'add_to_job_board' => (bool) $shift->add_to_job_board,
+                    'is_advanced_shift' => (bool) $shift->is_advanced_shift,
+                    'is_vacant' => (int) $shift->is_vacant,
+                    'is_cancelled' => (bool) $shift->is_cancelled,
+                    'is_approved' => (int) $shift->is_approved,
+                    'status' => $shift->status ?? 'Unknown',
+                    'is_split' => $is_split,
+                    'series_uuid' => $shift->series_uuid ?? null,
+                    'repeat_tooltip' => $shift->repeat_tooltip ?? '',
+                    'is_sleepover' => $this->isSleepoverShift($shiftSection['shift_type_id'] ?? null),
+                ];
+
+                // Handle shifts based on is_advanced_shift
+                if (! $shift->is_advanced_shift) {
+                    // Simple shift: single client_id and user_id
+                    $base['client_id'] = $clientSection['client_id'] ?? null;
+                    $base['user_id'] = $carerSection['user_id'] ?? null;
+
+                    return [$base];
+                }
+
+                // Advanced shift: handle multiple clients from client_section
+                $clientIds = $clientSection['client_id'] ?? [];
+                $clientIds = is_array($clientIds) ? $clientIds : [$clientIds];
+                $userIds = $carerSection['user_id'] ?? [];
+                $userIds = is_array($userIds) ? $userIds : [$userIds];
+
+                $records = [];
+                if (empty($clientIds)) {
+                    // No clients, create a single record with clientIds
                     $records[] = [
                         ...$base,
-                        'clientIds' => $clientIds,
-                        'user_id' => $userId,
+                        'clientIds' => [],
+                        'user_id' => $userIds[0] ?? null,
                     ];
-                }
-                // If no user IDs, create a single record with all client IDs
-                if (empty($userIds)) {
+                } elseif ($shift->is_vacant) {
+                    // Vacant advanced shift: one record with all client IDs
                     $records[] = [
                         ...$base,
                         'clientIds' => $clientIds,
                         'user_id' => null,
                     ];
+                } else {
+                    // Non-vacant advanced shift: one record per user, with all client IDs
+                    foreach ($userIds as $userId) {
+                        $records[] = [
+                            ...$base,
+                            'clientIds' => $clientIds,
+                            'user_id' => $userId,
+                        ];
+                    }
+                    // If no user IDs, create a single record with all client IDs
+                    if (empty($userIds)) {
+                        $records[] = [
+                            ...$base,
+                            'clientIds' => $clientIds,
+                            'user_id' => null,
+                        ];
+                    }
                 }
-            }
 
-            return $records;
-        })
-        ->flatten(1)
-        ->values()
-        ->toArray();
+                return $records;
+            })
+            ->flatten(1)
+            ->values()
+            ->toArray();
 
-    $this->clients = Client::where('user_id', $authUser->id)
-        ->where('is_archive', 'Unarchive')
-        ->get();
+        $this->clients = Client::where('user_id', $authUser->id)
+            ->where('is_archive', 'Unarchive')
+            ->get();
 
-    // Map client_id to display_name
-    $this->clientNames = $this->clients->pluck('display_name', 'id')->toArray();
+        // Map client_id to display_name
+        $this->clientNames = $this->clients->pluck('display_name', 'id')->toArray();
 
-    $this->priceBooks = PriceBook::with('priceBookDetails')
-        ->where('company_id', $companyId)
-        ->orderByDesc('id')
-        ->get();
+        $this->priceBooks = PriceBook::with('priceBookDetails')
+            ->where('company_id', $companyId)
+            ->orderByDesc('id')
+            ->get();
 
-    $this->shiftTypes = ShiftType::where('user_id', $authUser->id)->get();
+        $this->shiftTypes = ShiftType::where('user_id', $authUser->id)->get();
 
-    // Map shift_type_id to name
-    $this->shiftTypeNames = $this->shiftTypes->pluck('name', 'id')->toArray();
-}
+        // Map shift_type_id to name
+        $this->shiftTypeNames = $this->shiftTypes->pluck('name', 'id')->toArray();
+
+        // Fetch public holidays
+        $this->publicHolidays = \App\Models\PublicHoliday::where('company_id', $companyId)
+            ->where('status', 'Active')
+            ->pluck('date')
+            ->toArray();
+    }
 
     private function isSleepoverShift(?int $shiftTypeId): bool
     {
-        if (!$shiftTypeId) {
+        if (! $shiftTypeId) {
             return false;
         }
-        
+
         $shiftType = \App\Models\ShiftType::find($shiftTypeId);
-        
-        if (!$shiftType) {
+
+        if (! $shiftType) {
             return false;
         }
-        
+
         // Check if shift type name contains 'sleepover' (case insensitive)
         return stripos($shiftType->name, 'sleepover') !== false;
     }
@@ -326,22 +335,17 @@ public function mount()
         return $this->users ?? [];
     }
 
+    public function form(Form $form): Form
+    {
 
-
-public function form(Form $form): Form
-{
-
-       $authUser = Auth::user();
+        $authUser = Auth::user();
         $companyId = Company::where('user_id', $authUser->id)->value('id');
-    return $form
-        ->schema([
 
+        return $form
+            ->schema([
 
-
-
-
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <span class="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg"
                              viewBox="0 0 24 24"
@@ -354,64 +358,64 @@ public function form(Form $form): Form
                         <span>Client</span>
                     </span>
                 ')
-            )
-            ->schema([
-                Grid::make(3)
+                )
                     ->schema([
-                        Placeholder::make('choose_client_lab')
-                            ->label('Choose Client')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('choose_client_lab')
+                                    ->label('Choose Client')
+                                    ->columnSpan(1),
 
-                        Select::make('client_id')
-                            ->label('')
-                            ->options(
-                                Client::where('user_id', $authUser->id)->where('is_archive', 'Unarchive')
-                                    ->pluck('display_name', 'id')
-                            )
-                            ->columnSpan(2),
-                    ]),
+                                Select::make('client_id')
+                                    ->label('')
+                                    ->options(
+                                        Client::where('user_id', $authUser->id)->where('is_archive', 'Unarchive')
+                                            ->pluck('display_name', 'id')
+                                    )
+                                    ->columnSpan(2),
+                            ]),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('price_book_lab')
-                            ->label('Price Book')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('price_book_lab')
+                                    ->label('Price Book')
+                                    ->columnSpan(1),
 
-                        Select::make('price_book_id')
-                            ->label('')
-                            ->options(
-                                PriceBook::with('priceBookDetails')
-                                    ->where('company_id', $companyId)
-                                    ->orderByDesc('id')
-                                    ->pluck('name', 'id')
-                            )
-                            ->columnSpan(2),
-                    ]),
+                                Select::make('price_book_id')
+                                    ->label('')
+                                    ->options(
+                                        PriceBook::with('priceBookDetails')
+                                            ->where('company_id', $companyId)
+                                            ->orderByDesc('id')
+                                            ->pluck('name', 'id')
+                                    )
+                                    ->columnSpan(2),
+                            ]),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('funds_lab')
-                            ->label('Funds')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('funds_lab')
+                                    ->label('Funds')
+                                    ->columnSpan(1),
 
-                        Placeholder::make('funds')
-                            ->label('')
-                            ->content(function ($record) {
-                                return new HtmlString('
+                                Placeholder::make('funds')
+                                    ->label('')
+                                    ->content(function ($record) {
+                                        return new HtmlString('
                                     <span style="background-color:#FDF6EC;color:#FFA500;padding: 10px 15px 12px;border-radius: 10px;" class="px-3 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
                                         No Funds Available
                                     </span>
                                 ');
-                            })
-                            ->disableLabel(),
-                    ]),
-            ])
-            ->statePath('client_section')
-            ->extraAttributes(['style' => 'margin-top:100px'])
-            ->collapsible(),
+                                    })
+                                    ->disableLabel(),
+                            ]),
+                    ])
+                    ->statePath('client_section')
+                    ->extraAttributes(['style' => 'margin-top:100px'])
+                    ->collapsible(),
 
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <span class="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg"
                              viewBox="0 0 24 24"
@@ -426,90 +430,89 @@ public function form(Form $form): Form
                         <span>Shift</span>
                     </span>
                 ')
-            )
-            ->schema([
-                Grid::make(3)
+                )
                     ->schema([
-                        Placeholder::make('shift_types_lab')
-                            ->label('Shift Types')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('shift_types_lab')
+                                    ->label('Shift Types')
+                                    ->columnSpan(1),
 
-                    //    Select::make('shift_type_id')
-                    //         ->label('Shift Type')
-                    //         ->options(
-                    //             ShiftType::where('user_id', auth()->id())
-                    //                 ->get()
-                    //                 ->mapWithKeys(fn ($shift) => [
-                    //                     $shift->id =>
-                    //                         '<span class="flex items-center gap-2">
-                    //                             <span class="w-3 h-3 rounded-full"
-                    //                                 style="background-color:' . $shift->color . '"></span>
-                    //                             ' . e($shift->name) . '
-                    //                         </span>'
-                    //                 ])
-                    //                 ->toArray()
-                    //         )
-                    //         ->allowHtml() // 👈 so colors render
-                    //         ->searchable()
-                    //         ->preload()
-                    //         ->columnSpan(2),
+                                //    Select::make('shift_type_id')
+                                //         ->label('Shift Type')
+                                //         ->options(
+                                //             ShiftType::where('user_id', auth()->id())
+                                //                 ->get()
+                                //                 ->mapWithKeys(fn ($shift) => [
+                                //                     $shift->id =>
+                                //                         '<span class="flex items-center gap-2">
+                                //                             <span class="w-3 h-3 rounded-full"
+                                //                                 style="background-color:' . $shift->color . '"></span>
+                                //                             ' . e($shift->name) . '
+                                //                         </span>'
+                                //                 ])
+                                //                 ->toArray()
+                                //         )
+                                //         ->allowHtml() // 👈 so colors render
+                                //         ->searchable()
+                                //         ->preload()
+                                //         ->columnSpan(2),
 
                                 Select::make('shift_type_id')
-                                        ->options(
-                                            ShiftType::where('user_id', Auth::id())
-                                                ->pluck('name', 'id')
-                                        )
+                                    ->options(
+                                        ShiftType::where('user_id', Auth::id())
+                                            ->pluck('name', 'id')
+                                    )
                                     ->required()
                                     ->searchable()
                                     ->preload()
                                     ->label('')
                                     ->columnSpan(2),
 
+                            ]),
 
-                    ]),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('additional_shift_types_lab')
+                                    ->label('Additional Shift Types')
+                                    ->columnSpan(1),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('additional_shift_types_lab')
-                            ->label('Additional Shift Types')
-                            ->columnSpan(1),
+                                Select::make('additional_shift_types')
+                                    ->label('')
+                                    ->multiple()
+                                    ->options(
+                                        ShiftType::where('user_id', auth()->id())
+                                            ->pluck('name', 'id')
+                                    )
+                                    ->preload()
+                                    ->searchable()
+                                    ->columnSpan(2),
+                            ]),
 
-                        Select::make('additional_shift_types')
-                            ->label('')
-                            ->multiple()
-                            ->options(
-                                ShiftType::where('user_id', auth()->id())
-                                    ->pluck('name', 'id')
-                            )
-                            ->preload()
-                            ->searchable()
-                            ->columnSpan(2),
-                    ]),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('allowance_lab')
+                                    ->label('Allowance')
+                                    ->columnSpan(1),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('allowance_lab')
-                            ->label('Allowance')
-                            ->columnSpan(1),
+                                Select::make('allowance_id')
+                                    ->label('')
+                                    ->multiple()
+                                    ->preload()
+                                    ->searchable()
+                                    ->options(
+                                        \App\Models\Allowance::where('user_id', auth()->id())
+                                            ->pluck('name', 'id')
+                                    )
+                                    ->columnSpan(2),
+                            ]),
+                    ])
+                    ->statePath('shift_section')
+                    ->extraAttributes(['style' => 'margin-top:10px'])
+                    ->collapsible(),
 
-                        Select::make('allowance_id')
-                            ->label('')
-                            ->multiple()
-                            ->preload()
-                            ->searchable()
-                            ->options(
-                                \App\Models\Allowance::where('user_id', auth()->id())
-                                    ->pluck('name', 'id')
-                            )
-                            ->columnSpan(2),
-                    ]),
-            ])
-            ->statePath('shift_section')
-            ->extraAttributes(['style' => 'margin-top:10px'])
-            ->collapsible(),
-
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <span class="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg"
                              viewBox="0 0 24 24"
@@ -527,83 +530,80 @@ public function form(Form $form): Form
                         <span>Time & Location</span>
                     </span>
                 ')
-            )
-            ->schema([
-                Grid::make(3)
+                )
                     ->schema([
-                        Placeholder::make('date_lab')
-                            ->label('Date')
-                            ->columnSpan(1),
-                    DatePicker::make('start_date')
-                        ->label('')
-                        ->extraInputAttributes(['id' => 'start-date-input',
-                                                'wire:ignore' => true,]) // <-- UNIQUE ID
-                        ->columnSpan(2),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('date_lab')
+                                    ->label('Date')
+                                    ->columnSpan(1),
+                                DatePicker::make('start_date')
+                                    ->label('')
+                                    ->extraInputAttributes(['id' => 'start-date-input',
+                                        'wire:ignore' => true, ]) // <-- UNIQUE ID
+                                    ->columnSpan(2),
 
+                            ]),
+                        // Add initializer for START DATE
+                        View::make('start-date-initializer')
+                            ->view('filament.forms.components.js-initializer')
+                            ->viewData([
+                                'fieldId' => 'start-date-input',
+                            ]),
 
-                    ]),
-                    // Add initializer for START DATE
-                    View::make('start-date-initializer')
-                        ->view('filament.forms.components.js-initializer')
-                        ->viewData([
-                            'fieldId' => 'start-date-input'
-                        ]),
-              
+                        Grid::make(11)
+                            ->schema([
+                                Placeholder::make('time')
+                                    ->label('Time')
+                                    ->columnSpan(3),
 
-                Grid::make(11)
-                    ->schema([
-                        Placeholder::make('time')
-                            ->label('Time')
-                            ->columnSpan(3),
+                                TimePicker::make('start_time')
+                                    ->seconds(false)
+                                    ->extraInputAttributes(['id' => 'start-time-input'])
+                                    ->columnSpan(4),
 
-              TimePicker::make('start_time')
-                    ->seconds(false)
-                    ->extraInputAttributes(['id' => 'start-time-input'])
-                    ->columnSpan(4),
+                                TimePicker::make('end_time')
+                                    ->seconds(false)
+                                    ->extraInputAttributes(['id' => 'end-time-input'])
+                                    ->columnSpan(4),
 
-                TimePicker::make('end_time')
-                    ->seconds(false)
-                    ->extraInputAttributes(['id' => 'end-time-input'])
-                    ->columnSpan(4),
+                                View::make('start-time-init')
+                                    ->view('filament.forms.components.time-js-initializer')
+                                    ->viewData(['fieldId' => 'start-time-input']),
 
-                View::make('start-time-init')
-                    ->view('filament.forms.components.time-js-initializer')
-                    ->viewData(['fieldId' => 'start-time-input']),
+                                View::make('end-time-init')
+                                    ->view('filament.forms.components.time-js-initializer')
+                                    ->viewData(['fieldId' => 'end-time-input']),
 
-                View::make('end-time-init')
-                    ->view('filament.forms.components.time-js-initializer')
-                    ->viewData(['fieldId' => 'end-time-input']),
+                            ]),
 
+                        Grid::make(5)
+                            ->schema([
+                                Placeholder::make('')
+                                    ->label('')
+                                    ->columnSpan(3),
 
-                    ]),
+                                Checkbox::make('shift_finishes_next_day')
+                                    ->label('Shift finishes the next day')
+                                    ->reactive()
+                                    ->columnSpan(2),
 
-                      Grid::make(5)
-                    ->schema([
-                        Placeholder::make('')
-                            ->label('')
-                            ->columnSpan(3),
-
-                        Checkbox::make('shift_finishes_next_day')
-                            ->label('Shift finishes the next day')
-                            ->reactive()
-                            ->columnSpan(2),
-
-                            Placeholder::make('shift_info')
+                                Placeholder::make('shift_info')
                                     ->label('')
                                     ->content(function (Get $get) {
                                         $startDate = $get('start_date');
                                         $startTime = $get('start_time');
-                                        $endTime   = $get('end_time');
+                                        $endTime = $get('end_time');
                                         $finishesNextDay = (bool) $get('shift_finishes_next_day');
 
                                         // If any required field is missing → show nothing
-                                        if (!$startDate || !$startTime || !$endTime) {
+                                        if (! $startDate || ! $startTime || ! $endTime) {
                                             return '';
                                         }
 
                                         // Parse dates & times
                                         $start = Carbon::parse("$startDate $startTime");
-                                        $end   = Carbon::parse("$startDate $endTime");
+                                        $end = Carbon::parse("$startDate $endTime");
 
                                         // If overnight shift is marked → add one day to end
                                         if ($finishesNextDay) {
@@ -619,7 +619,7 @@ public function form(Form $form): Form
                                             : Carbon::parse($startDate)->format('d/m/Y');
 
                                         // Build message
-                                        $message = "This shift is " . number_format($hours, 1) . " hours";
+                                        $message = 'This shift is '.number_format($hours, 1).' hours';
 
                                         if ($finishesNextDay) {
                                             $message .= ', finishing next day';
@@ -629,292 +629,287 @@ public function form(Form $form): Form
 
                                         return $message;
                                     })
-                                    // Only show this placeholder when overnight is checked
+                                        // Only show this placeholder when overnight is checked
                                     ->visible(fn (Get $get) => (bool) $get('shift_finishes_next_day'))
                                     ->extraAttributes([
-                                        'style' => 'text-align: right; color: black;'
+                                        'style' => 'text-align: right; color: black;',
                                     ])
                                     ->columnSpan(5),
 
-                    ]),
-
-                    
-
-                Grid::make(5)
-                    ->schema([
-                        Placeholder::make('')
-                            ->label('')
-                            ->columnSpan(4),
-
-                        Checkbox::make('repeat')
-                            ->label('Repeat')
-                            ->columnSpan(1)
-                            ->extraAttributes([
-                                'x-model' => 'repeatChecked',
                             ]),
-                    ]),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('recurrance_lab')
-                            ->label('Recurrance')
-                            ->columnSpan(1),
+                        Grid::make(5)
+                            ->schema([
+                                Placeholder::make('')
+                                    ->label('')
+                                    ->columnSpan(4),
 
-                        Select::make('recurrance')
-                            ->options([
-                                'Daily' => 'Daily',
-                                'Weekly' => 'Weekly',
-                                'Monthly' => 'Monthly',
-                            ])
-                            ->label('')
-                            ->columnSpan(2)
-                            ->extraAttributes([
-                                'x-model' => 'recurrance',
+                                Checkbox::make('repeat')
+                                    ->label('Repeat')
+                                    ->columnSpan(1)
+                                    ->extraAttributes([
+                                        'x-model' => 'repeatChecked',
+                                    ]),
                             ]),
-                    ])
-                    ->extraAttributes([
-                        'x-show' => 'repeatChecked',
-                        'x-cloak' => true,
-                    ]),
 
-                Grid::make(10)
-                    ->schema([
-                        Placeholder::make('repeat_every_lab')
-                            ->label('Repeat every')
-                            ->columnSpan(3),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('recurrance_lab')
+                                    ->label('Recurrance')
+                                    ->columnSpan(1),
 
-                        Select::make('repeat_every_daily')
-                            ->label('')
-                            ->options([
-                                '1' => '1',
-                                '2' => '2',
-                                '3' => '3',
-                                '4' => '4',
-                                '5' => '5',
-                                '6' => '6',
-                                '7' => '7',
-                                '8' => '8',
-                                '9' => '9',
-                                '10' => '10',
-                                '11' => '11',
-                                '12' => '12',
-                                '13' => '13',
-                                '14' => '14',
-                                '15' => '15',
+                                Select::make('recurrance')
+                                    ->options([
+                                        'Daily' => 'Daily',
+                                        'Weekly' => 'Weekly',
+                                        'Monthly' => 'Monthly',
+                                    ])
+                                    ->label('')
+                                    ->columnSpan(2)
+                                    ->extraAttributes([
+                                        'x-model' => 'recurrance',
+                                    ]),
                             ])
-                            ->columnSpan(5),
+                            ->extraAttributes([
+                                'x-show' => 'repeatChecked',
+                                'x-cloak' => true,
+                            ]),
 
-                        Placeholder::make('day_lab')
-                            ->label('Day')
-                            ->columnSpan(2),
-                    ])
-                    ->extraAttributes([
-                        'x-show' => "recurrance === 'Daily'",
-                        'x-cloak' => true,
-                    ]),
+                        Grid::make(10)
+                            ->schema([
+                                Placeholder::make('repeat_every_lab')
+                                    ->label('Repeat every')
+                                    ->columnSpan(3),
 
-                Grid::make(10)
-                    ->schema([
-                        Placeholder::make('repeat_every_lab')
-                            ->label('Repeat every')
-                            ->columnSpan(3),
+                                Select::make('repeat_every_daily')
+                                    ->label('')
+                                    ->options([
+                                        '1' => '1',
+                                        '2' => '2',
+                                        '3' => '3',
+                                        '4' => '4',
+                                        '5' => '5',
+                                        '6' => '6',
+                                        '7' => '7',
+                                        '8' => '8',
+                                        '9' => '9',
+                                        '10' => '10',
+                                        '11' => '11',
+                                        '12' => '12',
+                                        '13' => '13',
+                                        '14' => '14',
+                                        '15' => '15',
+                                    ])
+                                    ->columnSpan(5),
 
-                        Select::make('repeat_every_weekly')
-                            ->label('')
-                            ->options([
-                                '1' => '1',
-                                '2' => '2',
-                                '3' => '3',
-                                '4' => '4',
-                                '5' => '5',
-                                '6' => '6',
-                                '7' => '7',
-                                '8' => '8',
-                                '9' => '9',
-                                '10' => '10',
-                                '11' => '11',
-                                '12' => '12',
+                                Placeholder::make('day_lab')
+                                    ->label('Day')
+                                    ->columnSpan(2),
                             ])
-                            ->columnSpan(5),
+                            ->extraAttributes([
+                                'x-show' => "recurrance === 'Daily'",
+                                'x-cloak' => true,
+                            ]),
 
-                        Placeholder::make('week_lab')
-                            ->label('Week')
-                            ->columnSpan(2),
+                        Grid::make(10)
+                            ->schema([
+                                Placeholder::make('repeat_every_lab')
+                                    ->label('Repeat every')
+                                    ->columnSpan(3),
 
-                        Placeholder::make('w_lab_occurs')
-                            ->label('Occurs on')
-                            ->columnSpan(2),
+                                Select::make('repeat_every_weekly')
+                                    ->label('')
+                                    ->options([
+                                        '1' => '1',
+                                        '2' => '2',
+                                        '3' => '3',
+                                        '4' => '4',
+                                        '5' => '5',
+                                        '6' => '6',
+                                        '7' => '7',
+                                        '8' => '8',
+                                        '9' => '9',
+                                        '10' => '10',
+                                        '11' => '11',
+                                        '12' => '12',
+                                    ])
+                                    ->columnSpan(5),
 
-                        Checkbox::make('occurs_on_weekly.sunday')
-                            ->label('Sun')
-                            ->columnSpan(2),
+                                Placeholder::make('week_lab')
+                                    ->label('Week')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.monday')
-                            ->label('Mon')
-                            ->columnSpan(2),
+                                Placeholder::make('w_lab_occurs')
+                                    ->label('Occurs on')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.tuesday')
-                            ->label('Tue')
-                            ->columnSpan(2),
+                                Checkbox::make('occurs_on_weekly.sunday')
+                                    ->label('Sun')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.wednesday')
-                            ->label('Wed')
-                            ->columnSpan(2),
+                                Checkbox::make('occurs_on_weekly.monday')
+                                    ->label('Mon')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.thursday')
-                            ->label('Thu')
-                            ->columnSpan(2),
+                                Checkbox::make('occurs_on_weekly.tuesday')
+                                    ->label('Tue')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.friday')
-                            ->label('Fri')
-                            ->columnSpan(2),
+                                Checkbox::make('occurs_on_weekly.wednesday')
+                                    ->label('Wed')
+                                    ->columnSpan(2),
 
-                        Checkbox::make('occurs_on_weekly.saturday')
-                            ->label('Sat')
-                            ->columnSpan(2),
+                                Checkbox::make('occurs_on_weekly.thursday')
+                                    ->label('Thu')
+                                    ->columnSpan(2),
 
-                    ])
-                    ->extraAttributes([
-                        'x-show' => "recurrance === 'Weekly'",
-                        'x-cloak' => true,
-                        'style' => 'margin-top:-10px',
-                    ]),
+                                Checkbox::make('occurs_on_weekly.friday')
+                                    ->label('Fri')
+                                    ->columnSpan(2),
 
-                Grid::make(10)
-                    ->schema([
-                        Placeholder::make('repeat_every_lab')
-                            ->label('Repeat every')
-                            ->columnSpan(3),
+                                Checkbox::make('occurs_on_weekly.saturday')
+                                    ->label('Sat')
+                                    ->columnSpan(2),
 
-                        Select::make('repeat_every_monthly')
-                            ->label('')
-                            ->options([
-                                '1' => '1',
-                                '2' => '2',
-                                '3' => '3',
                             ])
-                            ->columnSpan(5),
+                            ->extraAttributes([
+                                'x-show' => "recurrance === 'Weekly'",
+                                'x-cloak' => true,
+                                'style' => 'margin-top:-10px',
+                            ]),
 
-                        Placeholder::make('month_lab')
-                            ->label('Month')
-                            ->columnSpan(2),
+                        Grid::make(10)
+                            ->schema([
+                                Placeholder::make('repeat_every_lab')
+                                    ->label('Repeat every')
+                                    ->columnSpan(3),
 
-                        Placeholder::make('occurs_on_lab')
-                            ->label('Occurs on')
-                            ->columnSpan(3),
+                                Select::make('repeat_every_monthly')
+                                    ->label('')
+                                    ->options([
+                                        '1' => '1',
+                                        '2' => '2',
+                                        '3' => '3',
+                                    ])
+                                    ->columnSpan(5),
 
-                        Placeholder::make('day_on_lab')
-                            ->label('Day')
-                            ->columnSpan(1),
+                                Placeholder::make('month_lab')
+                                    ->label('Month')
+                                    ->columnSpan(2),
 
-                        Select::make('occurs_on_monthly')
-                            ->label('')
-                            ->options([
-                                '1' => '1',
-                                '2' => '2',
-                                '3' => '3',
-                                '4' => '4',
-                                '5' => '5',
-                                '6' => '6',
-                                '7' => '7',
-                                '8' => '8',
-                                '9' => '9',
-                                '10' => '10',
-                                '11' => '11',
-                                '12' => '12',
-                                '13' => '13',
-                                '14' => '14',
-                                '15' => '15',
-                                '16' => '16',
-                                '17' => '17',
-                                '18' => '18',
-                                '19' => '19',
-                                '20' => '20',
-                                '21' => '21',
-                                '22' => '22',
-                                '23' => '23',
-                                '24' => '24',
-                                '25' => '25',
-                                '26' => '26',
-                                '27' => '27',
-                                '28' => '28',
-                                '29' => '29',
-                                '30' => '30',
-                                '31' => '31',
+                                Placeholder::make('occurs_on_lab')
+                                    ->label('Occurs on')
+                                    ->columnSpan(3),
+
+                                Placeholder::make('day_on_lab')
+                                    ->label('Day')
+                                    ->columnSpan(1),
+
+                                Select::make('occurs_on_monthly')
+                                    ->label('')
+                                    ->options([
+                                        '1' => '1',
+                                        '2' => '2',
+                                        '3' => '3',
+                                        '4' => '4',
+                                        '5' => '5',
+                                        '6' => '6',
+                                        '7' => '7',
+                                        '8' => '8',
+                                        '9' => '9',
+                                        '10' => '10',
+                                        '11' => '11',
+                                        '12' => '12',
+                                        '13' => '13',
+                                        '14' => '14',
+                                        '15' => '15',
+                                        '16' => '16',
+                                        '17' => '17',
+                                        '18' => '18',
+                                        '19' => '19',
+                                        '20' => '20',
+                                        '21' => '21',
+                                        '22' => '22',
+                                        '23' => '23',
+                                        '24' => '24',
+                                        '25' => '25',
+                                        '26' => '26',
+                                        '27' => '27',
+                                        '28' => '28',
+                                        '29' => '29',
+                                        '30' => '30',
+                                        '31' => '31',
+                                    ])
+                                    ->columnSpan(4),
+
+                                Placeholder::make('month_lab')
+                                    ->label('Of the month')
+                                    ->columnSpan(2),
                             ])
-                            ->columnSpan(4),
+                            ->extraAttributes([
+                                'x-show' => "recurrance === 'Monthly'",
+                                'x-cloak' => true,
+                                'style' => 'margin-top:-40px',
+                            ]),
 
-                        Placeholder::make('month_lab')
-                            ->label('Of the month')
-                            ->columnSpan(2),
-                    ])
-                    ->extraAttributes([
-                        'x-show' => "recurrance === 'Monthly'",
-                        'x-cloak' => true,
-                        'style' => 'margin-top:-40px',
-                    ]),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('end_date_lab')
+                                    ->label('End Date')
+                                    ->columnSpan(1),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('end_date_lab')
-                            ->label('End Date')
-                            ->columnSpan(1),
+                                DatePicker::make('end_date')
+                                    ->label('')
+                                    ->extraInputAttributes(['id' => 'end-date-input',
+                                        'wire:ignore' => true, ]) // <-- UNIQUE ID
+                                    ->columnSpan(2),
 
-                        DatePicker::make('end_date')
-                            ->label('')
-                            ->extraInputAttributes(['id' => 'end-date-input',
-                                                'wire:ignore' => true,]) // <-- UNIQUE ID
-                            ->columnSpan(2),
-
-                    
-                    ])
-                    ->extraAttributes([
-                        'x-show' => 'repeatChecked',
-                        'x-cloak' => true,
-                    ]),
-                           // Add initializer for END DATE
+                            ])
+                            ->extraAttributes([
+                                'x-show' => 'repeatChecked',
+                                'x-cloak' => true,
+                            ]),
+                        // Add initializer for END DATE
                         View::make('end-date-initializer')
                             ->view('filament.forms.components.js-initializer')
                             ->viewData([
-                                'fieldId' => 'end-date-input'
+                                'fieldId' => 'end-date-input',
                             ]),
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('address_lab')
-                            ->label('Address')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('address_lab')
+                                    ->label('Address')
+                                    ->columnSpan(1),
 
-                        TextInput::make('address')
-                            ->label('')
-                            ->placeholder('Enter Address')
-                            ->columnSpan(2),
-                    ]),
+                                TextInput::make('address')
+                                    ->label('')
+                                    ->placeholder('Enter Address')
+                                    ->columnSpan(2),
+                            ]),
 
-               
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('unit_lab')
+                                    ->label('Unit/Apartment Number')
+                                    ->columnSpan(1),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('unit_lab')
-                            ->label('Unit/Apartment Number')
-                            ->columnSpan(1),
+                                TextInput::make('unit_apartment_number')
+                                    ->label('')
+                                    ->prefixIcon('heroicon-s-building-office')
+                                    ->placeholder('Enter Unit/Apartment Number')
+                                    ->columnSpan(2),
+                            ]),
+                    ])
+                    ->statePath('time_and_location')
+                    ->extraAttributes(['style' => 'margin-top:10px'])
+                    ->collapsible(),
 
-                        TextInput::make('unit_apartment_number')
-                            ->label('')
-                            ->prefixIcon('heroicon-s-building-office')
-                            ->placeholder('Enter Unit/Apartment Number')
-                            ->columnSpan(2),
-                    ]),
-            ])
-            ->statePath('time_and_location')
-            ->extraAttributes(['style' => 'margin-top:10px'])
-            ->collapsible(),
+                Toggle::make('add_to_job_board')
+                    ->reactive()
+                    ->label('Add To Job Board'),
 
-            Toggle::make('add_to_job_board')
-                ->reactive()
-                ->label('Add To Job Board'),
-
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <div class="flex items-center justify-between">
                         <span class="flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg"
@@ -929,58 +924,59 @@ public function form(Form $form): Form
                         </span>
                     </div>
                 ')
-            )
-            ->schema([
-                Grid::make(3)
+                )
                     ->schema([
-                        Placeholder::make('carers_lab')
-                            ->label('Choose Carer')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('carers_lab')
+                                    ->label('Choose Carer')
+                                    ->columnSpan(1),
 
-                        Select::make('user_id')
-                            ->label('')
-                            ->options(function () {
-                                $authUser = Auth::user();
+                                Select::make('user_id')
+                                    ->label('')
+                                    ->options(function () {
+                                        $authUser = Auth::user();
 
-                                $companyId = Company::where('user_id', $authUser->id)->value('id');
+                                        $companyId = Company::where('user_id', $authUser->id)->value('id');
 
-                                if (!$companyId) {
-                                    return [$authUser->id => $authUser->name];
-                                }
+                                        if (! $companyId) {
+                                            return [$authUser->id => $authUser->name];
+                                        }
 
-                                $staffUserIds = StaffProfile::where('company_id', $companyId)
-                                    ->where('is_archive', 'Unarchive')
-                                    ->pluck('user_id')
-                                    ->toArray();
+                                        $staffUserIds = StaffProfile::where('company_id', $companyId)
+                                            ->where('is_archive', 'Unarchive')
+                                            ->pluck('user_id')
+                                            ->toArray();
 
-                                if (!in_array($authUser->id, $staffUserIds)) {
-                                    $staffUserIds[] = $authUser->id;
-                                }
+                                        if (! in_array($authUser->id, $staffUserIds)) {
+                                            $staffUserIds[] = $authUser->id;
+                                        }
 
-                                return User::whereIn('id', $staffUserIds)
-                                    ->pluck('name', 'id')
-                                    ->toArray();
-                            })
-                            ->columnSpan(2)
-                            ->id('carer-select'),
-                    ]),
+                                        return User::whereIn('id', $staffUserIds)
+                                            ->pluck('name', 'id')
+                                            ->toArray();
+                                    })
+                                    ->columnSpan(2)
+                                    ->id('carer-select'),
+                            ]),
 
-                Grid::make(8)
-                    ->schema([
-                        Placeholder::make('')
-                            ->label('Suggested Carer')
-                            ->columnSpan(5),
+                        Grid::make(8)
+                            ->schema([
+                                Placeholder::make('')
+                                    ->label('Suggested Carer')
+                                    ->columnSpan(5),
 
-                        Placeholder::make('suggested_carer')
-                            ->label('')
-                            ->content(function () {
-                                $authUser = Auth::user();
-                                return new HtmlString('
+                                Placeholder::make('suggested_carer')
+                                    ->label('')
+                                    ->content(function () {
+                                        $authUser = Auth::user();
+
+                                        return new HtmlString('
                                     <span
                                         id="suggested-carer"
                                         style="text-decoration: none;color:#0D76CA"
                                     >
-                                        ' . $authUser->name . '... (28/35hrs)
+                                        '.$authUser->name.'... (28/35hrs)
                                     </span>
                                     <script>
                                         document.addEventListener("DOMContentLoaded", function() {
@@ -988,54 +984,54 @@ public function form(Form $form): Form
                                             const select = document.getElementById("carer-select");
                                             if(span && select) {
                                                 span.addEventListener("click", function() {
-                                                    select.value = "' . $authUser->id . '";
+                                                    select.value = "'.$authUser->id.'";
                                                     select.dispatchEvent(new Event("change"));
                                                 });
                                             }
                                         });
                                     </script>
                                 ');
-                            })
-                            ->disableLabel()
-                            ->columnSpan(3),
-                    ]),
+                                    })
+                                    ->disableLabel()
+                                    ->columnSpan(3),
+                            ]),
 
-                Grid::make(8)
-                    ->schema([
-                        Placeholder::make('')
-                            ->label('')
-                            ->columnSpan(6),
+                        Grid::make(8)
+                            ->schema([
+                                Placeholder::make('')
+                                    ->label('')
+                                    ->columnSpan(6),
 
-                        Checkbox::make('notify')
-                            ->label('Notify carer')
-                            ->columnSpan(2),
-                    ]),
+                                Checkbox::make('notify')
+                                    ->label('Notify carer')
+                                    ->columnSpan(2),
+                            ]),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('choose_pay_group')
-                            ->label('Choose pay group')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('choose_pay_group')
+                                    ->label('Choose pay group')
+                                    ->columnSpan(1),
 
-                        Select::make('pay_group_id')
-                            ->label('')
-                            ->options(function () {
-                                $auth = auth()->id();
+                                Select::make('pay_group_id')
+                                    ->label('')
+                                    ->options(function () {
+                                        $auth = auth()->id();
 
-                                return PayGroup::where('user_id', $auth)
-                                    ->where('is_archive', 0)
-                                    ->pluck('name', 'id')
-                                    ->toArray();
-                            })
-                            ->columnSpan(2),
-                    ]),
-            ])
-            ->statePath('carer_section')
-            ->extraAttributes(['style' => 'margin-top:10px'])
-            ->visible(fn (Get $get) => !$get('add_to_job_board')),
+                                        return PayGroup::where('user_id', $auth)
+                                            ->where('is_archive', 0)
+                                            ->pluck('name', 'id')
+                                            ->toArray();
+                                    })
+                                    ->columnSpan(2),
+                            ]),
+                    ])
+                    ->statePath('carer_section')
+                    ->extraAttributes(['style' => 'margin-top:10px'])
+                    ->visible(fn (Get $get) => ! $get('add_to_job_board')),
 
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <div class="flex items-center justify-between">
                         <span class="flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg"
@@ -1050,71 +1046,71 @@ public function form(Form $form): Form
                         </span>
                     </div>
                 ')
-            )
-            ->schema([
-                Grid::make(3)
+                )
                     ->schema([
-                        Placeholder::make('open_to')
-                            ->label('Open To')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('open_to')
+                                    ->label('Open To')
+                                    ->columnSpan(1),
 
-                        Select::make('team_id')
-                            ->label('')
-                            ->multiple()
-                            ->preload()
-                            ->searchable()
-                            ->options(function () {
-                                $authUser = Auth::user();
+                                Select::make('team_id')
+                                    ->label('')
+                                    ->multiple()
+                                    ->preload()
+                                    ->searchable()
+                                    ->options(function () {
+                                        $authUser = Auth::user();
 
-                                return Team::where('user_id', $authUser->id)
-                                    ->pluck('name', 'id')
-                                    ->toArray();
-                            })
-                            ->columnSpan(2),
-                    ]),
+                                        return Team::where('user_id', $authUser->id)
+                                            ->pluck('name', 'id')
+                                            ->toArray();
+                                    })
+                                    ->columnSpan(2),
+                            ]),
 
-                Grid::make(10)
-                    ->schema([
-                        Placeholder::make('')
-                            ->label('')
-                            ->columnSpan(7),
+                        Grid::make(10)
+                            ->schema([
+                                Placeholder::make('')
+                                    ->label('')
+                                    ->columnSpan(7),
 
-                        Placeholder::make('require_carer')
-                            ->label('')
-                            ->content(function () {
-                                return new HtmlString('
+                                Placeholder::make('require_carer')
+                                    ->label('')
+                                    ->content(function () {
+                                        return new HtmlString('
                                     <a href=""
                                         style="text-decoration: none;color:#0D76CA"
                                     >
                                         Detail requirements
                                     </a>
                                 ');
-                            })
-                            ->disableLabel()
-                            ->columnSpan(3),
-                    ]),
+                                    })
+                                    ->disableLabel()
+                                    ->columnSpan(3),
+                            ]),
 
-                Grid::make(3)
-                    ->schema([
-                        Placeholder::make('shift_assignment_lab')
-                            ->label('Shift Assignment')
-                            ->columnSpan(1),
+                        Grid::make(3)
+                            ->schema([
+                                Placeholder::make('shift_assignment_lab')
+                                    ->label('Shift Assignment')
+                                    ->columnSpan(1),
 
-                        Select::make('shift_assignment')
-                            ->label('')
-                            ->options([
-                                'Approve automatically' => 'Approve automatically',
-                                'Require approval' => 'Require approval',
-                            ])
-                            ->columnSpan(2),
-                    ]),
-            ])
-            ->statePath('job_section')
-            ->extraAttributes(['style' => 'margin-top:10px'])
-            ->visible(fn (Get $get) => $get('add_to_job_board')),
+                                Select::make('shift_assignment')
+                                    ->label('')
+                                    ->options([
+                                        'Approve automatically' => 'Approve automatically',
+                                        'Require approval' => 'Require approval',
+                                    ])
+                                    ->columnSpan(2),
+                            ]),
+                    ])
+                    ->statePath('job_section')
+                    ->extraAttributes(['style' => 'margin-top:10px'])
+                    ->visible(fn (Get $get) => $get('add_to_job_board')),
 
-            Section::make(
-                new HtmlString('
+                Section::make(
+                    new HtmlString('
                     <span class="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg"
                              fill="none"
@@ -1133,595 +1129,588 @@ public function form(Form $form): Form
                         <span>Instruction</span>
                     </span>
                 ')
-            )
-            ->schema([
-                Grid::make(1)
+                )
                     ->schema([
-                        RichEditor::make('description')
-                            ->label('')
-                            ->columnSpan(1),
-                    ]),
-            ])
-            ->statePath('instruction')
-            ->extraAttributes(['style' => 'margin-top:10px;margin-bottom:30px'])
-            ->collapsible(),
+                        Grid::make(1)
+                            ->schema([
+                                RichEditor::make('description')
+                                    ->label('')
+                                    ->columnSpan(1),
+                            ]),
+                    ])
+                    ->statePath('instruction')
+                    ->extraAttributes(['style' => 'margin-top:10px;margin-bottom:30px'])
+                    ->collapsible(),
 
-                ])->statePath('data');
+            ])->statePath('data');
 
     }
 
-public function createShift()
-{
-    $data = $this->form->getState();
-    $authUser = Auth::user();
-    $companyId = Company::where('user_id', $authUser->id)->value('id');
-
-    /**
-     * Generate repeat tooltip string based on recurrence settings
-     */
-    function generateRepeatTooltip($data, $startDate, $endDate)
+    public function createShift()
     {
-        $recurrence = data_get($data, 'time_and_location.recurrance');
-        $endDateFormatted = $endDate->format('d M Y');
-        
-        if ($recurrence === 'None' || $recurrence === null) {
+        $data = $this->form->getState();
+        $authUser = Auth::user();
+        $companyId = Company::where('user_id', $authUser->id)->value('id');
+
+        /**
+         * Generate repeat tooltip string based on recurrence settings
+         */
+        function generateRepeatTooltip($data, $startDate, $endDate)
+        {
+            $recurrence = data_get($data, 'time_and_location.recurrance');
+            $endDateFormatted = $endDate->format('d M Y');
+
+            if ($recurrence === 'None' || $recurrence === null) {
+                return null;
+            }
+
+            if ($recurrence === 'Daily') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_daily', 1);
+                $dayWord = $every === 1 ? 'day' : 'days';
+
+                return "Repeats every {$every} {$dayWord} until {$endDateFormatted}";
+            }
+
+            if ($recurrence === 'Weekly') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_weekly', 1);
+                $weekWord = $every === 1 ? 'week' : 'weeks';
+
+                $occursOn = data_get($data, 'time_and_location.occurs_on_weekly', []);
+                $dayAbbrev = [
+                    'monday' => 'Mon',
+                    'tuesday' => 'Tue',
+                    'wednesday' => 'Wed',
+                    'thursday' => 'Thu',
+                    'friday' => 'Fri',
+                    'saturday' => 'Sat',
+                    'sunday' => 'Sun',
+                ];
+
+                $selectedDays = [];
+                foreach ($dayAbbrev as $full => $abbr) {
+                    if (! empty($occursOn[$full])) {
+                        $selectedDays[] = $abbr;
+                    }
+                }
+
+                if (empty($selectedDays)) {
+                    return "Repeats every {$every} {$weekWord} until {$endDateFormatted}";
+                }
+
+                $daysString = implode(',', $selectedDays);
+
+                return "Repeats every {$every} {$weekWord} ({$daysString}) until {$endDateFormatted}";
+            }
+
+            if ($recurrence === 'Monthly') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_monthly', 1);
+                $monthWord = $every === 1 ? 'month' : 'months';
+                $occursOn = (int) data_get($data, 'time_and_location.occurs_on_monthly');
+
+                return "Repeats every {$every} {$monthWord} on day {$occursOn} until {$endDateFormatted}";
+            }
+
             return null;
         }
-        
-        if ($recurrence === 'Daily') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_daily', 1);
-            $dayWord = $every === 1 ? 'day' : 'days';
-            return "Repeats every {$every} {$dayWord} until {$endDateFormatted}";
+
+        // 🔑 One UUID for whole recurring series
+        $seriesUuid = (string) \Illuminate\Support\Str::uuid();
+
+        $startDate = Carbon::parse(data_get($data, 'time_and_location.start_date'));
+        $endDate = data_get($data, 'time_and_location.end_date')
+            ? Carbon::parse(data_get($data, 'time_and_location.end_date'))
+            : $startDate->copy();
+
+        // Generate repeat tooltip based on recurrence
+        $repeatTooltip = generateRepeatTooltip($data, $startDate, $endDate);
+
+        // --------------------------------------------------
+        // 🧑‍⚕️ Carer / Vacant Logic (UNCHANGED)
+        // --------------------------------------------------
+        $carerSection = empty($data['add_to_job_board']) ? [
+            'user_id' => data_get($data, 'carer_section.user_id'),
+            'pay_group_id' => data_get($data, 'carer_section.pay_group_id'),
+            'user_details' => data_get($data, 'carer_section.user_details', []),
+            'notify' => data_get($data, 'carer_section.notify', false),
+        ] : null;
+
+        $isVacant = 0;
+        if (
+            empty($data['add_to_job_board']) && (
+                ($carerSection['user_id'] === null && $carerSection['pay_group_id'] === null) ||
+                ($carerSection['user_id'] === [] && $carerSection['user_details'] === [] && $carerSection['notify'] === false)
+            )
+        ) {
+            $isVacant = 1;
         }
-        
-        if ($recurrence === 'Weekly') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_weekly', 1);
-            $weekWord = $every === 1 ? 'week' : 'weeks';
-            
-            $occursOn = data_get($data, 'time_and_location.occurs_on_weekly', []);
-            $dayAbbrev = [
-                'monday' => 'Mon',
-                'tuesday' => 'Tue',
-                'wednesday' => 'Wed',
-                'thursday' => 'Thu',
-                'friday' => 'Fri',
-                'saturday' => 'Sat',
-                'sunday' => 'Sun',
-            ];
-            
-            $selectedDays = [];
-            foreach ($dayAbbrev as $full => $abbr) {
-                if (!empty($occursOn[$full])) {
-                    $selectedDays[] = $abbr;
+
+        // --------------------------------------------------
+        // 🔁 BUILD REPEAT DATES (JS LOGIC MIRROR)
+        // --------------------------------------------------
+
+        $recurrence = data_get($data, 'time_and_location.recurrance');
+        $repeatDates = [];
+
+        for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+
+            if ($recurrence === 'Daily') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_daily', 1);
+                if ($startDate->diffInDays($date) % $every === 0) {
+                    $repeatDates[] = $date->copy();
                 }
-            }
-            
-            if (empty($selectedDays)) {
-                return "Repeats every {$every} {$weekWord} until {$endDateFormatted}";
-            }
-            
-            $daysString = implode(',', $selectedDays);
-            return "Repeats every {$every} {$weekWord} ({$daysString}) until {$endDateFormatted}";
-        }
-        
-        if ($recurrence === 'Monthly') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_monthly', 1);
-            $monthWord = $every === 1 ? 'month' : 'months';
-            $occursOn = (int) data_get($data, 'time_and_location.occurs_on_monthly');
-            return "Repeats every {$every} {$monthWord} on day {$occursOn} until {$endDateFormatted}";
-        }
-        
-        return null;
-    }
+            } elseif ($recurrence === 'Weekly') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_weekly', 1);
+                $weeks = floor($startDate->diffInDays($date) / 7);
+                $dayKey = strtolower($date->format('l'));
 
-    // 🔑 One UUID for whole recurring series
-    $seriesUuid = (string) \Illuminate\Support\Str::uuid();
+                if (
+                    $weeks % $every === 0 &&
+                    data_get($data, "time_and_location.occurs_on_weekly.$dayKey")
+                ) {
+                    $repeatDates[] = $date->copy();
+                }
+            } elseif ($recurrence === 'Monthly') {
+                $every = (int) data_get($data, 'time_and_location.repeat_every_monthly', 1);
+                $occursOn = (int) data_get($data, 'time_and_location.occurs_on_monthly');
 
-    $startDate = Carbon::parse(data_get($data, 'time_and_location.start_date'));
-    $endDate = data_get($data, 'time_and_location.end_date')
-        ? Carbon::parse(data_get($data, 'time_and_location.end_date'))
-        : $startDate->copy();
+                $monthsDiff = ($date->year - $startDate->year) * 12 + ($date->month - $startDate->month);
 
-    // Generate repeat tooltip based on recurrence
-    $repeatTooltip = generateRepeatTooltip($data, $startDate, $endDate);
-
-    // --------------------------------------------------
-    // 🧑‍⚕️ Carer / Vacant Logic (UNCHANGED)
-    // --------------------------------------------------
-    $carerSection = empty($data['add_to_job_board']) ? [
-        'user_id'      => data_get($data, 'carer_section.user_id'),
-        'pay_group_id' => data_get($data, 'carer_section.pay_group_id'),
-        'user_details' => data_get($data, 'carer_section.user_details', []),
-        'notify'       => data_get($data, 'carer_section.notify', false),
-    ] : null;
-
-    $isVacant = 0;
-    if (
-        empty($data['add_to_job_board']) && (
-            ($carerSection['user_id'] === null && $carerSection['pay_group_id'] === null) ||
-            ($carerSection['user_id'] === [] && $carerSection['user_details'] === [] && $carerSection['notify'] === false)
-        )
-    ) {
-        $isVacant = 1;
-    }
-
-    // --------------------------------------------------
-    // 🔁 BUILD REPEAT DATES (JS LOGIC MIRROR)
-    // --------------------------------------------------
-
-
-    $recurrence = data_get($data, 'time_and_location.recurrance');
-    $repeatDates = [];
-
-    for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
-
-        if ($recurrence === 'Daily') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_daily', 1);
-            if ($startDate->diffInDays($date) % $every === 0) {
-                $repeatDates[] = $date->copy();
+                if ($date->day === $occursOn && $monthsDiff % $every === 0) {
+                    $repeatDates[] = $date->copy();
+                }
+            } else {
+                $repeatDates[] = $startDate->copy();
+                break;
             }
         }
 
-        elseif ($recurrence === 'Weekly') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_weekly', 1);
-            $weeks = floor($startDate->diffInDays($date) / 7);
-            $dayKey = strtolower($date->format('l'));
+        // --------------------------------------------------
+        // 🔂 CREATE SHIFTS + ALL RELATED RECORDS
+        // --------------------------------------------------
+        $skippedCount = 0;
 
-            if (
-                $weeks % $every === 0 &&
-                data_get($data, "time_and_location.occurs_on_weekly.$dayKey")
-            ) {
-                $repeatDates[] = $date->copy();
+        /**
+         * Helper function to convert time string to minutes past midnight
+         * Handles both same-day and overnight shifts
+         */
+        $timeToMinutes = function ($time, $startMinutes, $endMinutes) {
+            [$hours, $minutes] = explode(':', $time);
+            $totalMinutes = (int) $hours * 60 + (int) $minutes;
+            // If overnight shift (end time is earlier than start time), add 24 hours
+            if ($endMinutes <= $startMinutes) {
+                $totalMinutes += 24 * 60;
             }
-        }
 
-        elseif ($recurrence === 'Monthly') {
-            $every = (int) data_get($data, 'time_and_location.repeat_every_monthly', 1);
-            $occursOn = (int) data_get($data, 'time_and_location.occurs_on_monthly');
+            return $totalMinutes;
+        };
 
-            $monthsDiff = ($date->year - $startDate->year) * 12 + ($date->month - $startDate->month);
+        foreach ($repeatDates as $shiftDate) {
 
-            if ($date->day === $occursOn && $monthsDiff % $every === 0) {
-                $repeatDates[] = $date->copy();
-            }
-        }
+            // Check for overlapping shift for the same staff on same date
+            $userId = $carerSection['user_id'] ?? null;
+            if ($userId && ! is_array($userId)) {
+                $newStartTime = data_get($data, 'time_and_location.start_time');
+                $newEndTime = data_get($data, 'time_and_location.end_time');
+                $newShiftFinishesNextDay = data_get($data, 'time_and_location.shift_finishes_next_day', false);
 
-        else {
-            $repeatDates[] = $startDate->copy();
-            break;
-        }
-    }
+                // Convert new shift times to minutes past midnight
+                [$newStartHours, $newStartMinutes] = explode(':', $newStartTime);
+                $newStartTotal = (int) $newStartHours * 60 + (int) $newStartMinutes;
+                [$newEndHours, $newEndMinutes] = explode(':', $newEndTime);
+                $newEndTotal = (int) $newEndHours * 60 + (int) $newEndMinutes;
 
-    // --------------------------------------------------
-    // 🔂 CREATE SHIFTS + ALL RELATED RECORDS
-    // --------------------------------------------------
-    $skippedCount = 0;
-    
-    /**
-     * Helper function to convert time string to minutes past midnight
-     * Handles both same-day and overnight shifts
-     */
-    $timeToMinutes = function ($time, $startMinutes, $endMinutes) {
-        [$hours, $minutes] = explode(':', $time);
-        $totalMinutes = (int)$hours * 60 + (int)$minutes;
-        // If overnight shift (end time is earlier than start time), add 24 hours
-        if ($endMinutes <= $startMinutes) {
-            $totalMinutes += 24 * 60;
-        }
-        return $totalMinutes;
-    };
-    
-    foreach ($repeatDates as $shiftDate) {
+                // Handle overnight for new shift
+                if ($newEndTotal <= $newStartTotal || $newShiftFinishesNextDay) {
+                    $newEndTotal += 24 * 60;
+                }
 
-        // Check for overlapping shift for the same staff on same date
-        $userId = $carerSection['user_id'] ?? null;
-        if ($userId && !is_array($userId)) {
-            $newStartTime = data_get($data, 'time_and_location.start_time');
-            $newEndTime = data_get($data, 'time_and_location.end_time');
-            $newShiftFinishesNextDay = data_get($data, 'time_and_location.shift_finishes_next_day', false);
-            
-            // Convert new shift times to minutes past midnight
-            [$newStartHours, $newStartMinutes] = explode(':', $newStartTime);
-            $newStartTotal = (int)$newStartHours * 60 + (int)$newStartMinutes;
-            [$newEndHours, $newEndMinutes] = explode(':', $newEndTime);
-            $newEndTotal = (int)$newEndHours * 60 + (int)$newEndMinutes;
-            
-            // Handle overnight for new shift
-            if ($newEndTotal <= $newStartTotal || $newShiftFinishesNextDay) {
-                $newEndTotal += 24 * 60;
-            }
-            
-            // Get all existing shifts for this staff on this date
-            $existingShifts = Shift::where('company_id', $companyId)
-                ->whereRaw('JSON_EXTRACT(carer_section, "$.user_id") = ?', [$userId])
-                ->whereRaw('JSON_EXTRACT(time_and_location, "$.start_date") = ?', [$shiftDate->toDateString()])
-                ->get();
-            
-            $hasOverlap = false;
-            foreach ($existingShifts as $existingShift) {
-                $existingTimeLocation = is_string($existingShift->time_and_location) 
-                    ? json_decode($existingShift->time_and_location, true) 
-                    : ($existingShift->time_and_location ?? []);
-                
-                $existingStartTime = $existingTimeLocation['start_time'] ?? '';
-                $existingEndTime = $existingTimeLocation['end_time'] ?? '';
-                $existingFinishesNextDay = $existingTimeLocation['shift_finishes_next_day'] ?? false;
-                
-                if (empty($existingStartTime) || empty($existingEndTime)) {
+                // Get all existing shifts for this staff on this date
+                $existingShifts = Shift::where('company_id', $companyId)
+                    ->whereRaw('JSON_EXTRACT(carer_section, "$.user_id") = ?', [$userId])
+                    ->whereRaw('JSON_EXTRACT(time_and_location, "$.start_date") = ?', [$shiftDate->toDateString()])
+                    ->get();
+
+                $hasOverlap = false;
+                foreach ($existingShifts as $existingShift) {
+                    $existingTimeLocation = is_string($existingShift->time_and_location)
+                        ? json_decode($existingShift->time_and_location, true)
+                        : ($existingShift->time_and_location ?? []);
+
+                    $existingStartTime = $existingTimeLocation['start_time'] ?? '';
+                    $existingEndTime = $existingTimeLocation['end_time'] ?? '';
+                    $existingFinishesNextDay = $existingTimeLocation['shift_finishes_next_day'] ?? false;
+
+                    if (empty($existingStartTime) || empty($existingEndTime)) {
+                        continue;
+                    }
+
+                    // Convert existing shift times to minutes past midnight
+                    [$existingStartHours, $existingStartMinutes] = explode(':', $existingStartTime);
+                    $existingStartTotal = (int) $existingStartHours * 60 + (int) $existingStartMinutes;
+                    [$existingEndHours, $existingEndMinutes] = explode(':', $existingEndTime);
+                    $existingEndTotal = (int) $existingEndHours * 60 + (int) $existingEndMinutes;
+
+                    // Handle overnight for existing shift
+                    if ($existingEndTotal <= $existingStartTotal || $existingFinishesNextDay) {
+                        $existingEndTotal += 24 * 60;
+                    }
+
+                    // Check for overlap: new shift overlaps if newStart < existingEnd AND newEnd > existingStart
+                    if ($newStartTotal < $existingEndTotal && $newEndTotal > $existingStartTotal) {
+                        $hasOverlap = true;
+                        break;
+                    }
+                }
+
+                if ($hasOverlap) {
+                    $skippedCount++;
+
                     continue;
                 }
-                
-                // Convert existing shift times to minutes past midnight
-                [$existingStartHours, $existingStartMinutes] = explode(':', $existingStartTime);
-                $existingStartTotal = (int)$existingStartHours * 60 + (int)$existingStartMinutes;
-                [$existingEndHours, $existingEndMinutes] = explode(':', $existingEndTime);
-                $existingEndTotal = (int)$existingEndHours * 60 + (int)$existingEndMinutes;
-                
-                // Handle overnight for existing shift
-                if ($existingEndTotal <= $existingStartTotal || $existingFinishesNextDay) {
-                    $existingEndTotal += 24 * 60;
-                }
-                
-                // Check for overlap: new shift overlaps if newStart < existingEnd AND newEnd > existingStart
-                if ($newStartTotal < $existingEndTotal && $newEndTotal > $existingStartTotal) {
-                    $hasOverlap = true;
-                    break;
-                }
             }
 
-            if ($hasOverlap) {
-                $skippedCount++;
-                continue;
-            }
-        }
+            // --------------------------------------------------
+            // 🟢 CREATE SHIFT (FULL OLD STRUCTURE)
+            // --------------------------------------------------
+            $newShift = Shift::create([
+                'series_uuid' => $seriesUuid,
+                'company_id' => $companyId,
 
-        // --------------------------------------------------
-        // 🟢 CREATE SHIFT (FULL OLD STRUCTURE)
-        // --------------------------------------------------
-        $newShift = Shift::create([
-            'series_uuid' => $seriesUuid,
-            'company_id'  => $companyId,
+                'client_section' => [
+                    'client_id' => data_get($data, 'client_section.client_id'),
+                    'price_book_id' => data_get($data, 'client_section.price_book_id'),
+                    'funds' => data_get($data, 'client_section.funds'),
+                ],
 
-            'client_section' => [
-                'client_id'     => data_get($data, 'client_section.client_id'),
-                'price_book_id' => data_get($data, 'client_section.price_book_id'),
-                'funds'         => data_get($data, 'client_section.funds'),
-            ],
+                'shift_section' => [
+                    'shift_type_id' => data_get($data, 'shift_section.shift_type_id'),
+                    'additional_shift_types' => data_get($data, 'shift_section.additional_shift_types', []),
+                    'allowance_id' => data_get($data, 'shift_section.allowance_id', []),
+                ],
 
-            'shift_section' => [
-                'shift_type_id'          => data_get($data, 'shift_section.shift_type_id'),
-                'additional_shift_types' => data_get($data, 'shift_section.additional_shift_types', []),
-                'allowance_id'           => data_get($data, 'shift_section.allowance_id', []),
-            ],
+                'time_and_location' => [
+                    'start_date' => $shiftDate->toDateString(),
+                    'shift_finishes_next_day' => data_get($data, 'time_and_location.shift_finishes_next_day', false),
+                    'start_time' => data_get($data, 'time_and_location.start_time'),
+                    'end_time' => data_get($data, 'time_and_location.end_time'),
+                    'repeat' => false,        // 🔒 already expanded
+                    'recurrance' => null,
+                    'repeat_every_daily' => null,
+                    'repeat_every_weekly' => null,
+                    'repeat_every_monthly' => null,
+                    'occurs_on_monthly' => null,
+                    'occurs_on_weekly' => null,
+                    'end_date' => null,
+                    'address' => data_get($data, 'time_and_location.address'),
+                    'unit_apartment_number' => data_get($data, 'time_and_location.unit_apartment_number'),
+                ],
 
-            'time_and_location' => [
-                'start_date'              => $shiftDate->toDateString(),
-                'shift_finishes_next_day' => data_get($data, 'time_and_location.shift_finishes_next_day', false),
-                'start_time'              => data_get($data, 'time_and_location.start_time'),
-                'end_time'                => data_get($data, 'time_and_location.end_time'),
-                'repeat'                  => false,        // 🔒 already expanded
-                'recurrance'              => null,
-                'repeat_every_daily'      => null,
-                'repeat_every_weekly'     => null,
-                'repeat_every_monthly'    => null,
-                'occurs_on_monthly'       => null,
-                'occurs_on_weekly'        => null,
-                'end_date'                => null,
-                'address'                 => data_get($data, 'time_and_location.address'),
-                'unit_apartment_number'   => data_get($data, 'time_and_location.unit_apartment_number'),
-            ],
+                'add_to_job_board' => data_get($data, 'add_to_job_board', false),
+                'carer_section' => $carerSection,
 
-            'add_to_job_board' => data_get($data, 'add_to_job_board', false),
-            'carer_section'    => $carerSection,
+                'job_section' => ! empty($data['add_to_job_board']) ? [
+                    'team_id' => data_get($data, 'job_section.team_id', []),
+                    'shift_assignment' => data_get($data, 'job_section.shift_assignment'),
+                ] : null,
 
-            'job_section' => !empty($data['add_to_job_board']) ? [
-                'team_id'          => data_get($data, 'job_section.team_id', []),
-                'shift_assignment' => data_get($data, 'job_section.shift_assignment'),
-            ] : null,
+                'status' => ! empty($data['add_to_job_board']) ? 'Job Board' : 'Pending',
 
-            'status' => !empty($data['add_to_job_board']) ? 'Job Board' : 'Pending',
+                'instruction' => [
+                    'description' => data_get($data, 'instruction.description'),
+                ],
 
-            'instruction' => [
-                'description' => data_get($data, 'instruction.description'),
-            ],
+                'is_vacant' => $isVacant,
+                'repeat_tooltip' => $repeatTooltip,
+            ]);
 
-            'is_vacant' => $isVacant,
-            'repeat_tooltip' => $repeatTooltip,
-        ]);
+            // --------------------------------------------------
+            // 📧 SEND SHIFT ASSIGNMENT EMAIL TO STAFF
+            // --------------------------------------------------
+            if (($data['add_to_job_board'] == 0) && ($isVacant == 0)) {
+                $userId = $carerSection['user_id'] ?? null;
 
-        // --------------------------------------------------
-        // 📧 SEND SHIFT ASSIGNMENT EMAIL TO STAFF
-        // --------------------------------------------------
-        if (($data['add_to_job_board'] == 0) && ($isVacant == 0)) {
-            $userId = $carerSection['user_id'] ?? null;
-            
-            // Handle both single user_id and array of user_ids
-            if ($userId) {
-                $userIds = is_array($userId) ? $userId : [$userId];
-                
-                foreach ($userIds as $staffUserId) {
-                    $staffUser = User::find($staffUserId);
-                    
-                    if ($staffUser && $staffUser->email) {
-                        try {
-                            Mail::to($staffUser->email)->send(new ShiftAssignment($newShift, $staffUser, $authUser));
-                            // Add delay to avoid rate limiting
-                            usleep(500000); // 0.5 second delay between emails
-                        } catch (\Exception $e) {
-                            // Log error but don't break shift creation
-                            \Log::error('Failed to send shift assignment email: ' . $e->getMessage());
+                // Handle both single user_id and array of user_ids
+                if ($userId) {
+                    $userIds = is_array($userId) ? $userId : [$userId];
+
+                    foreach ($userIds as $staffUserId) {
+                        $staffUser = User::find($staffUserId);
+
+                        if ($staffUser && $staffUser->email) {
+                            try {
+                                Mail::to($staffUser->email)->send(new ShiftAssignment($newShift, $staffUser, $authUser));
+                                // Add delay to avoid rate limiting
+                                usleep(500000); // 0.5 second delay between emails
+                            } catch (\Exception $e) {
+                                // Log error but don't break shift creation
+                                \Log::error('Failed to send shift assignment email: '.$e->getMessage());
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // --------------------------------------------------
-        // 🧾 BILLING + TIMESHEET (OLD LOGIC 100%)
-        // --------------------------------------------------
-       if (($data['add_to_job_board'] == 0) && ($isVacant == 0)) {
+            // --------------------------------------------------
+            // 🧾 BILLING + TIMESHEET (OLD LOGIC 100%)
+            // --------------------------------------------------
+            if (($data['add_to_job_board'] == 0) && ($isVacant == 0)) {
 
-    // Use the actual shift date from the loop
-    $shiftDate = Carbon::parse($shiftDate);
+                // Use the actual shift date from the loop
+                $shiftDate = Carbon::parse($shiftDate);
 
-    $shiftStart  = Carbon::parse($shiftDate->toDateString() . ' ' . data_get($data, 'time_and_location.start_time'));
-    $shiftEnd    = Carbon::parse($shiftDate->toDateString() . ' ' . data_get($data, 'time_and_location.end_time'));
-    $priceBookId = data_get($data, 'client_section.price_book_id');
+                $shiftStart = Carbon::parse($shiftDate->toDateString().' '.data_get($data, 'time_and_location.start_time'));
+                $shiftEnd = Carbon::parse($shiftDate->toDateString().' '.data_get($data, 'time_and_location.end_time'));
+                $priceBookId = data_get($data, 'client_section.price_book_id');
 
-    $fetchPriceBook = PriceBook::where('id', $priceBookId)->first();
+                $fetchPriceBook = PriceBook::where('id', $priceBookId)->first();
 
-    // Handle overnight shifts for hour calculation (still needed for hourly & display)
-    if ($shiftEnd->lessThanOrEqualTo($shiftStart)) {
-        $shiftEnd = $shiftEnd->addDay();
-    }
+                // Handle overnight shifts for hour calculation (still needed for hourly & display)
+                if ($shiftEnd->lessThanOrEqualTo($shiftStart)) {
+                    $shiftEnd = $shiftEnd->addDay();
+                }
 
-    $hours = $shiftStart->floatDiffInHours($shiftEnd);
+                $hours = $shiftStart->floatDiffInHours($shiftEnd);
 
-    // ────────────────────────────────────────────────
-    //          FIXED PRICE vs HOURLY LOGIC
-    // ────────────────────────────────────────────────
-    $isFixedPrice = $fetchPriceBook && $fetchPriceBook->fixed_price == 1;
+                // ────────────────────────────────────────────────
+                //          FIXED PRICE vs HOURLY LOGIC
+                // ────────────────────────────────────────────────
+                $isFixedPrice = $fetchPriceBook && $fetchPriceBook->fixed_price == 1;
 
-    if ($isFixedPrice) {
-        // ─── CHANGED: No time logic — just take the FIRST price book detail record ───
-        $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
-            ->orderBy('id')           // or ->first() — simplest and most predictable
-            ->first();
+                if ($isFixedPrice) {
+                    // ─── CHANGED: No time logic — just take the FIRST price book detail record ───
+                    $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
+                        ->orderBy('id')           // or ->first() — simplest and most predictable
+                        ->first();
 
-        $fixedAmount   = $priceDetail ? (float) $priceDetail->per_hour : 0.0;
-        $totalCost     = $fixedAmount;
-        $hoursXRate    = 'Fixed: $' . number_format($totalCost, 2);
-        $displayHours  = 'Fixed price';
-    } else {
-        // ─── HOURLY LOGIC REMAINS 100% UNCHANGED ───
-        $dayOfWeek = $shiftDate->format('l');
-        $dayType = match ($dayOfWeek) {
-            'Saturday' => 'Saturday',
-            'Sunday'   => 'Sunday',
-            default    => 'Weekdays - I',
-        };
+                    $fixedAmount = $priceDetail ? (float) $priceDetail->per_hour : 0.0;
+                    $totalCost = $fixedAmount;
+                    $hoursXRate = 'Fixed: $'.number_format($totalCost, 2);
+                    $displayHours = 'Fixed price';
+                } else {
+                    // ─── HOURLY LOGIC REMAINS 100% UNCHANGED ───
+                    $dayOfWeek = $shiftDate->format('l');
+                    $dayType = match ($dayOfWeek) {
+                        'Saturday' => 'Saturday',
+                        'Sunday' => 'Sunday',
+                        default => 'Weekdays - I',
+                    };
 
-        $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
-            ->where('day_of_week', $dayType)
-            ->where(function ($q) use ($shiftEnd) {
-                $endTime = $shiftEnd->format('H:i:s');
+                    $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
+                        ->where('day_of_week', $dayType)
+                        ->where(function ($q) use ($shiftEnd) {
+                            $endTime = $shiftEnd->format('H:i:s');
 
-                $q->where(function ($sub) use ($endTime) {
-                    $sub->whereRaw('? BETWEEN start_time AND end_time', [$endTime])
-                        ->whereColumn('end_time', '>', 'start_time');
-                })
-                ->orWhere(function ($sub) use ($endTime) {
-                    $sub->whereColumn('end_time', '<', 'start_time')
-                        ->where(function ($wrap) use ($endTime) {
-                            $wrap->where('start_time', '<=', $endTime)
-                                 ->orWhere('end_time', '>=', $endTime);
-                        });
-                })
-                ->orWhere(function ($sub) {
-                    $sub->whereTime('start_time', '00:00:00')
-                        ->whereTime('end_time', '00:00:00');
-                });
-            })
-            ->orderBy('start_time')
-            ->first();
+                            $q->where(function ($sub) use ($endTime) {
+                                $sub->whereRaw('? BETWEEN start_time AND end_time', [$endTime])
+                                    ->whereColumn('end_time', '>', 'start_time');
+                            })
+                                ->orWhere(function ($sub) use ($endTime) {
+                                    $sub->whereColumn('end_time', '<', 'start_time')
+                                        ->where(function ($wrap) use ($endTime) {
+                                            $wrap->where('start_time', '<=', $endTime)
+                                                ->orWhere('end_time', '>=', $endTime);
+                                        });
+                                })
+                                ->orWhere(function ($sub) {
+                                    $sub->whereTime('start_time', '00:00:00')
+                                        ->whereTime('end_time', '00:00:00');
+                                });
+                        })
+                        ->orderBy('start_time')
+                        ->first();
 
-        $rate          = $priceDetail?->per_hour ?? 0;
-        $totalCost     = $hours * $rate;
-        $hoursXRate    = number_format($hours, 1) . ' x $' . number_format($rate, 2);
-        $displayHours  = number_format($hours, 1) . ' hrs';
-    }
+                    $rate = $priceDetail?->per_hour ?? 0;
+                    $totalCost = $hours * $rate;
+                    $hoursXRate = number_format($hours, 1).' x $'.number_format($rate, 2);
+                    $displayHours = number_format($hours, 1).' hrs';
+                }
 
-    $per_km_price = $priceDetail?->per_km ?? 0;
-    $distanceXRate = 0.0 . ' x $' . number_format($per_km_price, 2);
+                $per_km_price = $priceDetail?->per_km ?? 0;
+                $distanceXRate = 0.0.' x $'.number_format($per_km_price, 2);
 
-    // ────────────────────────────────────────────────
-    //          BILLING REPORT — unchanged except values above
-    // ────────────────────────────────────────────────
-    $billingRecordForClient = BillingReport::create([
-        'date'            => $shiftDate->toDateString(),
-        'shift_id'        => $newShift->id,
-        'staff'           => data_get($data, 'carer_section.user_id'),
-        'start_time'      => $shiftStart->format('H:i'),
-        'end_time'        => $shiftEnd->format('H:i'),
-        'hours_x_rate'    => $hoursXRate,
-        'additional_cost' => 0.0,
-        'distance_x_rate' => $distanceXRate,
-        'total_cost'      => $totalCost,
-        'running_total'   => null,
-        'price_book_id'   => $priceBookId,
-        'client_id'       => data_get($data, 'client_section.client_id'),
-    ]);
+                // ────────────────────────────────────────────────
+                //          BILLING REPORT — unchanged except values above
+                // ────────────────────────────────────────────────
+                $billingRecordForClient = BillingReport::create([
+                    'date' => $shiftDate->toDateString(),
+                    'shift_id' => $newShift->id,
+                    'staff' => data_get($data, 'carer_section.user_id'),
+                    'start_time' => $shiftStart->format('H:i'),
+                    'end_time' => $shiftEnd->format('H:i'),
+                    'hours_x_rate' => $hoursXRate,
+                    'additional_cost' => 0.0,
+                    'distance_x_rate' => $distanceXRate,
+                    'total_cost' => $totalCost,
+                    'running_total' => null,
+                    'price_book_id' => $priceBookId,
+                    'client_id' => data_get($data, 'client_section.client_id'),
+                ]);
 
-            // -------------------------------------------------
-            // 🧑‍⚕️ Timesheet Report
-            // -------------------------------------------------
-            $TimesheetReportForStaff = TimesheetReport::create([
-                'user_id'    => data_get($data, 'carer_section.user_id'),
-                'shift_id'   => $newShift->id,
-                'date'       => $shiftDate->toDateString(), // ✅ FIXED
-                'clients'    => json_encode($newShift->client_section),
-                'start_time' => $shiftStart->format('H:i:s'),
-                'end_time'   => $shiftEnd->format('H:i:s'),
-                'break_time' => 0,
-                'hours'      => $hours,
-                'distance'   => null,
-                'expense'    => null,
-                'allowances' => json_encode(data_get($data, 'shift_section.allowance_id', [])),
-                'clockin'    => null,
-                'clockout'   => null,
-            ]);
+                // -------------------------------------------------
+                // 🧑‍⚕️ Timesheet Report
+                // -------------------------------------------------
+                $TimesheetReportForStaff = TimesheetReport::create([
+                    'user_id' => data_get($data, 'carer_section.user_id'),
+                    'shift_id' => $newShift->id,
+                    'date' => $shiftDate->toDateString(), // ✅ FIXED
+                    'clients' => json_encode($newShift->client_section),
+                    'start_time' => $shiftStart->format('H:i:s'),
+                    'end_time' => $shiftEnd->format('H:i:s'),
+                    'break_time' => 0,
+                    'hours' => $hours,
+                    'distance' => null,
+                    'expense' => null,
+                    'allowances' => json_encode(data_get($data, 'shift_section.allowance_id', [])),
+                    'clockin' => null,
+                    'clockout' => null,
+                ]);
 
+                // -------------------------------------------------------------
+                // 🧾 Create Timesheet (Detailed Logic)
+                // -------------------------------------------------------------
+                $authUser = Auth::user();
+                $companyId = Company::where('user_id', $authUser->id)->value('id');
+                $userId = data_get($data, 'carer_section.user_id');
+                $shiftStart = Carbon::parse(data_get($data, 'time_and_location.start_time'));
+                $shiftEnd = Carbon::parse(data_get($data, 'time_and_location.end_time'));
+                $shiftDate = Carbon::parse(data_get($data, 'time_and_location.start_date'));
+                $totalHours = $hours;
 
+                // Determine approval status
+                $isApproved = $newShift->is_approved ?? false;
+                $approvedStatus = $isApproved ? 0 : 1; // 1 = pending approval
 
-      // -------------------------------------------------------------
-        // 🧾 Create Timesheet (Detailed Logic)
-        // -------------------------------------------------------------
-        $authUser   = Auth::user();
-        $companyId  = Company::where('user_id', $authUser->id)->value('id');
-        $userId     = data_get($data, 'carer_section.user_id');
-        $shiftStart = Carbon::parse(data_get($data, 'time_and_location.start_time'));
-        $shiftEnd   = Carbon::parse(data_get($data, 'time_and_location.end_time'));
-        $shiftDate  = Carbon::parse(data_get($data, 'time_and_location.start_date'));
-        $totalHours = $hours;
+                // -------------------------------------------------------------
+                // 🕒 Determine Hours by Time Ranges (Weekdays / Sat / Sun)
+                // -------------------------------------------------------------
+                $weekday_12a_6a = 0;
+                $weekday_6a_8p = 0;
+                $weekday_8p_10p = 0;
+                $weekday_10p_12a = 0;
+                $saturday = 0;
+                $sunday = 0;
+                $public_holidays = 0;
 
-        // Determine approval status
-        $isApproved = $newShift->is_approved ?? false;
-        $approvedStatus = $isApproved ? 0 : 1; // 1 = pending approval
+                // ✅ Check if date is Saturday / Sunday / Public Holiday
+                $dayOfWeek = $shiftDate->format('l');
+                $isPublicHoliday = false;
 
-        // -------------------------------------------------------------
-        // 🕒 Determine Hours by Time Ranges (Weekdays / Sat / Sun)
-        // -------------------------------------------------------------
-        $weekday_12a_6a = 0;
-        $weekday_6a_8p  = 0;
-        $weekday_8p_10p = 0;
-        $weekday_10p_12a = 0;
-        $saturday = 0;
-        $sunday = 0;
-        $public_holidays = 0;
+                // Optional: if you have a public holiday table
+                // $isPublicHoliday = PublicHoliday::whereDate('date', $shiftDate)->exists();
 
-        // ✅ Check if date is Saturday / Sunday / Public Holiday
-        $dayOfWeek = $shiftDate->format('l');
-        $isPublicHoliday = false;
+                if ($dayOfWeek === 'Saturday') {
+                    $saturday = $totalHours;
+                } elseif ($dayOfWeek === 'Sunday') {
+                    $sunday = $totalHours;
+                } elseif ($isPublicHoliday) {
+                    $public_holidays = $totalHours;
+                } else {
+                    // -------------------------------------------------------------
+                    // 🕒 Improved Weekday Time Range Logic (Accurate to the minute)
+                    // -------------------------------------------------------------
+                    // Convert both start and end into absolute minutes from 00:00
+                    $startMinutes = ($shiftStart->hour * 60) + $shiftStart->minute;
+                    $endMinutes = ($shiftEnd->hour * 60) + $shiftEnd->minute;
 
-        // Optional: if you have a public holiday table
-        // $isPublicHoliday = PublicHoliday::whereDate('date', $shiftDate)->exists();
+                    // Handle overnight (e.g., 22:00 → 06:00 next day)
+                    if ($endMinutes <= $startMinutes) {
+                        $endMinutes += 24 * 60;
+                    }
 
-        if ($dayOfWeek === 'Saturday') {
-            $saturday = $totalHours;
-        } elseif ($dayOfWeek === 'Sunday') {
-            $sunday = $totalHours;
-        } elseif ($isPublicHoliday) {
-            $public_holidays = $totalHours;
-        } else {
-            // -------------------------------------------------------------
-            // 🕒 Improved Weekday Time Range Logic (Accurate to the minute)
-            // -------------------------------------------------------------
-            // Convert both start and end into absolute minutes from 00:00
-            $startMinutes = ($shiftStart->hour * 60) + $shiftStart->minute;
-            $endMinutes   = ($shiftEnd->hour * 60) + $shiftEnd->minute;
+                    // Define weekday segments in minutes from midnight
+                    $segments = [
+                        '12a_6a' => [0, 360],     // 00:00 – 06:00
+                        '6a_8p' => [360, 1200],  // 06:00 – 20:00
+                        '8p_10p' => [1200, 1320], // 20:00 – 22:00
+                        '10p_12a' => [1320, 1440], // 22:00 – 24:00
+                    ];
 
-            // Handle overnight (e.g., 22:00 → 06:00 next day)
-            if ($endMinutes <= $startMinutes) {
-                $endMinutes += 24 * 60;
+                    // Helper closure to calculate overlap in hours
+                    $calcOverlap = function ($rangeStart, $rangeEnd) use ($startMinutes, $endMinutes) {
+                        $overlap = max(0, min($endMinutes, $rangeEnd) - max($startMinutes, $rangeStart));
+
+                        return round($overlap / 60, 2); // in hours, rounded
+                    };
+
+                    // Apply the overlap logic for each segment
+                    $weekday_12a_6a = $calcOverlap(...$segments['12a_6a']);
+                    $weekday_6a_8p = $calcOverlap(...$segments['6a_8p']);
+                    $weekday_8p_10p = $calcOverlap(...$segments['8p_10p']);
+                    $weekday_10p_12a = $calcOverlap(...$segments['10p_12a']);
+                }
+
+                // -------------------------------------------------------------
+                // ✅ Calculate Standard Hours & Total as the Sum of All Hour Columns
+                // -------------------------------------------------------------
+                $standard_hours =
+                    $weekday_12a_6a +
+                    $weekday_6a_8p +
+                    $weekday_8p_10p +
+                    $weekday_10p_12a +
+                    $saturday +
+                    $sunday +
+                    $public_holidays;
+
+                $total = $standard_hours;
+
+                // -------------------------------------------------------------
+                // 💾 Create Timesheet Record
+                // -------------------------------------------------------------
+                $timesheet = Timesheet::create([
+                    'user_id' => $userId,
+                    'company_id' => $companyId,
+                    'shift_id' => $newShift->id,
+                    'timesheet_report_id' => $TimesheetReportForStaff->id,
+                    'approved_status' => $approvedStatus,
+                    'weekday_12a_6a' => $weekday_12a_6a,
+                    'weekday_6a_8p' => $weekday_6a_8p,
+                    'weekday_8p_10p' => $weekday_8p_10p,
+                    'weekday_10p_12a' => $weekday_10p_12a,
+                    'saturday' => $saturday,
+                    'sunday' => $sunday,
+                    'public_holidays' => $public_holidays,
+                    'break_time' => 0,
+                    'standard_hours' => $standard_hours,
+                    'total' => $total,
+                    'mileage' => 0,
+                    'expense' => 0,
+                    'sleepover' => 0,
+                ]);
             }
 
-            // Define weekday segments in minutes from midnight
-            $segments = [
-                '12a_6a'  => [0, 360],     // 00:00 – 06:00
-                '6a_8p'   => [360, 1200],  // 06:00 – 20:00
-                '8p_10p'  => [1200, 1320], // 20:00 – 22:00
-                '10p_12a' => [1320, 1440], // 22:00 – 24:00
-            ];
-
-            // Helper closure to calculate overlap in hours
-            $calcOverlap = function ($rangeStart, $rangeEnd) use ($startMinutes, $endMinutes) {
-                $overlap = max(0, min($endMinutes, $rangeEnd) - max($startMinutes, $rangeStart));
-                return round($overlap / 60, 2); // in hours, rounded
-            };
-
-            // Apply the overlap logic for each segment
-            $weekday_12a_6a  = $calcOverlap(...$segments['12a_6a']);
-            $weekday_6a_8p   = $calcOverlap(...$segments['6a_8p']);
-            $weekday_8p_10p  = $calcOverlap(...$segments['8p_10p']);
-            $weekday_10p_12a = $calcOverlap(...$segments['10p_12a']);
-        }
-
-        // -------------------------------------------------------------
-        // ✅ Calculate Standard Hours & Total as the Sum of All Hour Columns
-        // -------------------------------------------------------------
-        $standard_hours = 
-            $weekday_12a_6a +
-            $weekday_6a_8p +
-            $weekday_8p_10p +
-            $weekday_10p_12a +
-            $saturday +
-            $sunday +
-            $public_holidays;
-
-        $total = $standard_hours;
-
-        // -------------------------------------------------------------
-        // 💾 Create Timesheet Record
-        // -------------------------------------------------------------
-        $timesheet = Timesheet::create([
-            'user_id'             => $userId,
-            'company_id'          => $companyId,
-            'shift_id'            => $newShift->id,
-            'timesheet_report_id' => $TimesheetReportForStaff->id,
-            'approved_status'     => $approvedStatus,
-            'weekday_12a_6a'      => $weekday_12a_6a,
-            'weekday_6a_8p'       => $weekday_6a_8p,
-            'weekday_8p_10p'      => $weekday_8p_10p,
-            'weekday_10p_12a'     => $weekday_10p_12a,
-            'saturday'            => $saturday,
-            'sunday'              => $sunday,
-            'public_holidays'     => $public_holidays,
-            'break_time'          => 0,
-            'standard_hours'      => $standard_hours,
-            'total'               => $total,
-            'mileage'             => 0,
-            'expense'             => 0,
-            'sleepover'           => 0,
-        ]);
-        }
-
-        // --------------------------------------------------
-        // 📝 EVENTS (UNCHANGED)
-        // --------------------------------------------------
-        Event::create([
-            'shift_id' => $newShift->id,
-            'title'    => $authUser->name . ' Created Shift',
-            'from'     => 'Create',
-            'body'     => 'Shift created',
-        ]);
-
-        if (!empty($data['add_to_job_board'])) {
+            // --------------------------------------------------
+            // 📝 EVENTS (UNCHANGED)
+            // --------------------------------------------------
             Event::create([
                 'shift_id' => $newShift->id,
-                'title'    => 'Job Listed',
-                'from'     => 'Job',
-                'body'     => 'Job listed by ' . $authUser->name,
+                'title' => $authUser->name.' Created Shift',
+                'from' => 'Create',
+                'body' => 'Shift created',
             ]);
+
+            if (! empty($data['add_to_job_board'])) {
+                Event::create([
+                    'shift_id' => $newShift->id,
+                    'title' => 'Job Listed',
+                    'from' => 'Job',
+                    'body' => 'Job listed by '.$authUser->name,
+                ]);
+            }
         }
+
+        if ($skippedCount > 0) {
+            Notification::make()
+                ->title('Some shifts were not created because the staff already has shifts at those times. Please change the time or date if you want to create the record with this staff.')
+                ->warning()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('Shift series created successfully')
+                ->success()
+                ->send();
+        }
+
+        $startDate = data_get($data, 'time_and_location.start_date');
+        $this->redirect('/admin/schedular?date='.$startDate);
     }
-
-    if ($skippedCount > 0) {
-        Notification::make()
-            ->title('Some shifts were not created because the staff already has shifts at those times. Please change the time or date if you want to create the record with this staff.')
-            ->warning()
-            ->send();
-    } else {
-        Notification::make()
-            ->title('Shift series created successfully')
-            ->success()
-            ->send();
-    }
-
-    $startDate = data_get($data, 'time_and_location.start_date');
-    $this->redirect('/admin/schedular?date=' . $startDate);
 }
-
-
-
-}
- 

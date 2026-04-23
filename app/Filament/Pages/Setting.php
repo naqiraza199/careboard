@@ -1116,4 +1116,18 @@ class Setting extends Page
             'id' => 'edit-shift-' . $id,
         ]);
     }
+
+    public function deleteHoliday($id)
+    {
+        $holiday = \App\Models\PublicHoliday::find($id);
+        
+        if ($holiday) {
+            $holiday->delete();
+            
+            \Filament\Notifications\Notification::make()
+                ->title('Public holiday deleted successfully!')
+                ->success()
+                ->send();
+        }
+    }
 }

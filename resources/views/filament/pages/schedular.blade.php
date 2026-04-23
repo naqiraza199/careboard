@@ -916,22 +916,37 @@ body.sidebar-collapsed .main-content-sidebar {
     border-bottom-left-radius: 0px !important;
 }
 
-/* Status Icons */
-.status-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    font-size: 10px;
-    margin-left: 4px;
-    vertical-align: middle;
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    font-size: 14px;
-}
+         /* Public Holiday Badge */
+        .public-holiday-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            font-size: 8px;
+            margin-left: 3px;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        /* Status Icons */
+        .status-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 10px;
+            margin-left: 4px;
+            vertical-align: middle;
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            font-size: 14px;
+        }
 .status-icon-booked {
     color: #10b981;
 }
@@ -1059,7 +1074,7 @@ body.sidebar-collapsed .main-content-sidebar {
 
     </style>
 
-    <div wire:ignore.self x-data="{ calendarType: 'staff', viewType: 'Weekly' }">
+    <div wire:ignore.self x-data="{ calendarType: 'client', viewType: 'Weekly' }">
         <!-- Calendar Switcher -->
         <div class="mb-4 flex items-center gap-3" style="margin-left: 12px;">
             <select id="calendarType" x-model="calendarType" class="custom-select small">
@@ -1220,10 +1235,11 @@ body.sidebar-collapsed .main-content-sidebar {
         </div>
 
         <script>
-            const users = @json($users ?? []);
+             const users = @json($users ?? []);
             const shifts = @json($shifts ?? []);
             const clientNames = @json($clientNames ?? []);
             const shiftTypeNames = @json($shiftTypeNames ?? []);
+            const publicHolidays = @json($publicHolidays ?? []);
 
             let currentDate = new Date();
             const urlParams = new URLSearchParams(window.location.search);
@@ -1421,15 +1437,19 @@ function renderStaffCalendar(filteredShifts = shifts) {
             `;
             calendar.appendChild(labelCell);
 
-            // timeline cell (no color)
+             // timeline cell (no color)
             const timelineCell = document.createElement('div');
             timelineCell.className = 'calendar-day daily-row';
+
+            const dateKey = formatDateKey(startDate);
+            // Add public holiday styling
+            if (isPublicHoliday(dateKey)) {
+                timelineCell.style.background = getPublicHolidayColor(dateKey);
+            }
 
             const wrapper = document.createElement('div');
             wrapper.className = 'timeline-wrapper';
             timelineCell.appendChild(wrapper);
-
-            const dateKey = formatDateKey(startDate);
             const relevant = filteredShifts.filter(s => {
                 if (taskName === 'Vacant Shift' && !s.is_vacant) return false;
                 if (taskName === 'Job Board' && !s.add_to_job_board) return false;
@@ -1493,15 +1513,19 @@ function renderStaffCalendar(filteredShifts = shifts) {
             };
             calendar.appendChild(staffCell);
 
-            // 🔹 Create the timeline cell for this staff row
+             // 🔹 Create the timeline cell for this staff row
             const timelineCell = document.createElement('div');
             timelineCell.className = 'calendar-day daily-row';
+
+            const dateKey = formatDateKey(startDate);
+            // Add public holiday styling
+            if (isPublicHoliday(dateKey)) {
+                timelineCell.style.background = getPublicHolidayColor(dateKey);
+            }
 
             const wrapper = document.createElement('div');
             wrapper.className = 'timeline-wrapper';
             timelineCell.appendChild(wrapper);
-
-            const dateKey = formatDateKey(startDate);
             const userShifts = filteredShifts.filter(
                 s => String(s.user_id) === String(userId) && isShiftInDateRange(s, dateKey)
             );
@@ -1565,12 +1589,13 @@ function renderStaffCalendar(filteredShifts = shifts) {
         // pending map stores next-day DOM pieces keyed by row & date
         const pendingOvernight = {};
 
-        dates.forEach((d, i) => {
-            const header = document.createElement('div');
-            header.className = 'day-header';
-            header.textContent = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
-            calendar.appendChild(header);
-        });
+         dates.forEach((d, i) => {
+             const header = document.createElement('div');
+             header.className = 'day-header';
+             const dateKey = formatDateKey(d);
+             header.textContent = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
+             calendar.appendChild(header);
+         });
         calendar.className = `calendar-grid ${viewType.toLowerCase()}`;
 
         const staticTasks = ['Vacant Shift', 'Job Board'];
@@ -1597,13 +1622,17 @@ function renderStaffCalendar(filteredShifts = shifts) {
             calendar.appendChild(staffCell);
 
             // 🔹 create day cells for this row
-            dates.forEach(d => {
-                const dayCell = document.createElement('div');
-                dayCell.className = 'calendar-day';
-const dateKey = formatDateKey(d);
-// mark row/date on cell (used for pending appends)
-dayCell.setAttribute('data-date', dateKey);
-dayCell.setAttribute('data-row', `static__${taskName}`);
+             dates.forEach(d => {
+                 const dayCell = document.createElement('div');
+                 dayCell.className = 'calendar-day';
+                 const dateKey = formatDateKey(d);
+                 // Add public holiday styling
+                 if (isPublicHoliday(dateKey)) {
+                     dayCell.style.background = getPublicHolidayColor(dateKey);
+                 }
+ // mark row/date on cell (used for pending appends)
+ dayCell.setAttribute('data-date', dateKey);
+ dayCell.setAttribute('data-row', `static__${taskName}`);
 
 const relevant = filteredShifts.filter(s => {
     if (taskName === 'Vacant Shift' && !s.is_vacant) return false;
@@ -1721,12 +1750,16 @@ calendar.appendChild(dayCell);
             };
             calendar.appendChild(staffCell);
 
-            // 🔹 Create day cells for this user row
+             // 🔹 Create day cells for this user row
             dates.forEach(d => {
                 const dayCell = document.createElement('div');
                 dayCell.className = 'calendar-day';
 
                 const dateKey = formatDateKey(d);
+                // Add public holiday styling
+                if (isPublicHoliday(dateKey)) {
+                    dayCell.style.background = getPublicHolidayColor(dateKey);
+                }
                 // mark row/date on cell (used for pending appends)
                 dayCell.setAttribute('data-date', dateKey);
                 dayCell.setAttribute('data-row', `user__${userId}`);
@@ -1873,12 +1906,15 @@ function renderClientCalendar(filteredShifts = shifts) {
         calendar.appendChild(vacantLabel);
 
         const vacantTimeline = document.createElement('div');
-        vacantTimeline.className = 'calendar-day daily-row';
+         vacantTimeline.className = 'calendar-day daily-row';
+        const dateKey = formatDateKey(startDate);
+        // Add public holiday styling
+        if (isPublicHoliday(dateKey)) {
+            vacantTimeline.style.background = getPublicHolidayColor(dateKey);
+        }
         const vacantWrapper = document.createElement('div');
         vacantWrapper.className = 'timeline-wrapper';
         vacantTimeline.appendChild(vacantWrapper);
-
-        const dateKey = formatDateKey(startDate);
         vacantTimeline.onclick = () => handleEmptyCalendarClick(dateKey);
 
         const vacantShifts = filteredShifts.filter(
@@ -1941,8 +1977,14 @@ function renderClientCalendar(filteredShifts = shifts) {
             };
             calendar.appendChild(clientCell);
 
-            const timelineCell = document.createElement('div');
+             const timelineCell = document.createElement('div');
             timelineCell.className = 'calendar-day daily-row';
+
+            const dateKey = formatDateKey(startDate);
+            // Add public holiday styling
+            if (isPublicHoliday(dateKey)) {
+                timelineCell.style.background = getPublicHolidayColor(dateKey);
+            }
 
             const wrapper = document.createElement('div');
             wrapper.className = 'timeline-wrapper';
@@ -1997,12 +2039,13 @@ function renderClientCalendar(filteredShifts = shifts) {
         weekRange.textContent = formatDateRange(startDate, endDate);
         calendar.className = `calendar-grid ${viewType.toLowerCase()}`;
 
-        dates.forEach(d => {
-            const header = document.createElement('div');
-            header.className = 'day-header';
-            header.textContent = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
-            calendar.appendChild(header);
-        });
+         dates.forEach(d => {
+             const header = document.createElement('div');
+             header.className = 'day-header';
+             const dateKey = formatDateKey(d);
+             header.textContent = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
+             calendar.appendChild(header);
+         });
 
         const pendingOvernight = {};
 
@@ -2015,11 +2058,15 @@ function renderClientCalendar(filteredShifts = shifts) {
         `;
         calendar.appendChild(vacantLabel);
 
-        dates.forEach(d => {
-            const dateKey = formatDateKey(d);
-            const cell = document.createElement('div');
-            cell.className = 'calendar-day';
-            cell.setAttribute('data-date', dateKey);
+         dates.forEach(d => {
+             const dateKey = formatDateKey(d);
+             const cell = document.createElement('div');
+             cell.className = 'calendar-day';
+             // Add public holiday styling
+             if (isPublicHoliday(dateKey)) {
+                 cell.style.background = getPublicHolidayColor(dateKey);
+             }
+             cell.setAttribute('data-date', dateKey);
             cell.setAttribute('data-row', 'vacant');
 
             const vacantShifts = filteredShifts.filter(
@@ -2111,11 +2158,15 @@ function renderClientCalendar(filteredShifts = shifts) {
             };
             calendar.appendChild(clientCell);
 
-            dates.forEach(d => {
-                const dateKey = formatDateKey(d);
-                const cell = document.createElement('div');
-                cell.className = 'calendar-day';
-                cell.setAttribute('data-date', dateKey);
+             dates.forEach(d => {
+                 const dateKey = formatDateKey(d);
+                 const cell = document.createElement('div');
+                 cell.className = 'calendar-day';
+                 // Add public holiday styling
+                 if (isPublicHoliday(dateKey)) {
+                     cell.style.background = getPublicHolidayColor(dateKey);
+                 }
+                 cell.setAttribute('data-date', dateKey);
                 cell.setAttribute('data-row', `client__${clientId}`);
 
                 const clientShifts = filteredShifts.filter(
@@ -2213,6 +2264,25 @@ function formatDateRange(startDate, endDate) {
     // If different years - show "Dec 2025 - Jan 2026"
     return `${startMonth} ${startYear} - ${endMonth} ${endYear}`;
 }
+
+// Public holiday helpers
+function isPublicHoliday(dateKey) {
+    return publicHolidays.includes(dateKey);
+}
+
+function getPublicHolidayColor(dateKey) {
+    const colors = [
+        'rgba(255, 235, 238, 0.8)',
+        'rgba(237, 242, 255, 0.8)',
+        'rgba(232, 245, 233, 0.8)',
+        'rgba(255, 243, 204, 0.8)',
+        'rgba(243, 237, 245, 0.8)',
+        'rgba(255, 237, 225, 0.8)',
+    ];
+    const hash = dateKey.split('-').reduce((a, b) => a + parseInt(b || '0'), 0);
+    return colors[hash % colors.length];
+}
+
 function calculateShiftPosition(shift, refDate) {
     const shiftStart = new Date(`${shift.start_date}T${shift.start_time || '00:00'}`);
     const shiftEnd = new Date(`${shift.end_date || shift.start_date}T${shift.end_time || '23:59'}`);
