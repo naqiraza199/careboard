@@ -1672,14 +1672,24 @@ if (($data['add_to_job_board'] == 0) && ($isVacant == 0)) {
         $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
             ->orderBy('id')
             ->first();
-    } else {
-        // ─── HOURLY LOGIC REMAINS 100% UNCHANGED ───
-        $dayOfWeek = $shiftDate->format('l');
-        $dayType = match ($dayOfWeek) {
-            'Saturday' => 'Saturday',
-            'Sunday'   => 'Sunday',
-            default    => 'Weekdays - I',
-        };
+     } else {
+         // ─── HOURLY LOGIC WITH PUBLIC HOLIDAY CHECK ───
+         $dayOfWeek = $shiftDate->format('l');
+         $companyId = Company::where('user_id', Auth::id())->value('id');
+         $isPublicHoliday = in_array($shiftDate->toDateString(), \App\Models\PublicHoliday::where('company_id', $companyId)
+             ->where('status', 'Active')
+             ->pluck('date')
+             ->toArray());
+         
+         if ($isPublicHoliday) {
+             $dayType = 'Public Holidays';
+         } else {
+             $dayType = match ($dayOfWeek) {
+                 'Saturday' => 'Saturday',
+                 'Sunday'   => 'Sunday',
+                 default    => 'Weekdays - I',
+             };
+         }
 
         $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
             ->where('day_of_week', $dayType)

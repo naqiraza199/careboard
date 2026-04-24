@@ -326,11 +326,6 @@ public static function getEloquentQuery(): Builder
                     })
 
 
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

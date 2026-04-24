@@ -101,11 +101,6 @@ class ClientArchiveResource extends Resource
                         ->send();
      
                     }),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

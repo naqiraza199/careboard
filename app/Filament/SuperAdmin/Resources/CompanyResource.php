@@ -120,11 +120,6 @@ class CompanyResource extends Resource
                    Tables\Actions\ViewAction::make()->button()->color('warning')->label('')->iconbutton()->tooltip('View Company'),
                   Tables\Actions\EditAction::make()->button()->color('stripe')->label('')->iconbutton()->tooltip('Edit Company'),
                   Tables\Actions\DeleteAction::make()->button()->color('danger')->label('')->iconbutton()->tooltip('Delete Company'),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

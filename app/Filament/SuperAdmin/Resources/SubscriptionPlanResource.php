@@ -107,11 +107,6 @@ class SubscriptionPlanResource extends Resource
                 Tables\Actions\ViewAction::make()->button()->color('warning')->label('')->iconbutton()->tooltip('View Plan'),
                   Tables\Actions\EditAction::make()->button()->color('stripe')->label('')->iconbutton()->tooltip('Edit Plan'),
                   Tables\Actions\DeleteAction::make()->button()->color('danger')->label('')->iconbutton()->tooltip('Delete Plan'),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

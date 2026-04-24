@@ -138,26 +138,30 @@
    .sidebar-nav .dropdown-container.open .dropdown-icon {
    transform: rotate(180deg);
    }
-   .sidebar-nav .dropdown-menu {
-   height: 0;
-   overflow-y: hidden;
-   list-style: none;
-   padding-left: 15px;
-   transition: height 0.4s ease;
-   }
-   .sidebar.collapsed .dropdown-menu {
-   position: absolute;
-   top: -10px;
-   left: 100%;
-   opacity: 0;
-   height: auto !important;
-   padding-right: 10px;
-   overflow-y: unset;
-   pointer-events: none;
-   border-radius: 0 10px 10px 0;
-   background: #151A2D;
-   transition: 0s;
-   }
+    .sidebar-nav .dropdown-menu {
+    max-height: 0;
+    overflow-y: hidden;
+    list-style: none;
+    padding-left: 15px;
+    transition: max-height 0.5s ease;
+    }
+    .sidebar-nav .dropdown-container.open > .dropdown-menu {
+    max-height: 5000px;
+    }
+    .sidebar.collapsed .dropdown-menu {
+    position: absolute;
+    top: -10px;
+    left: 100%;
+    opacity: 0;
+    height: auto !important;
+    max-height: none !important;
+    padding-right: 10px;
+    overflow-y: unset;
+    pointer-events: none;
+    border-radius: 0 10px 10px 0;
+    background: #151A2D;
+    transition: 0s;
+    }
    .sidebar.collapsed .dropdown-menu:has(.dropdown-link) {
    padding: 7px 10px 7px 24px;
    }
@@ -809,36 +813,24 @@
    </nav>
 </aside>
 <script>
-   document.addEventListener("DOMContentLoaded", () => {
-     const toggleDropdown = (dropdown, menu, isOpen) => {
-       if (!menu) return;
-       if (isOpen) {
-         dropdown.classList.add("open");
-         menu.style.height = `${menu.scrollHeight}px`;
-       } else {
-         dropdown.classList.remove("open");
-         menu.style.height = 0;
-       }
-       adjustAllOpenDropdownHeights();
-     };
-   
-     const adjustAllOpenDropdownHeights = () => {
-       requestAnimationFrame(() => {
-         document.querySelectorAll(".dropdown-container.open").forEach((openDropdown) => {
-           const m = openDropdown.querySelector(":scope > .dropdown-menu");
-           if (m) m.style.height = `${m.scrollHeight}px`;
-         });
-       });
-     };
-   
-     const closeAllDropdowns = (except = null) => {
-       document.querySelectorAll(".dropdown-container.open").forEach((openDropdown) => {
-         if (openDropdown !== except) {
-           const menu = openDropdown.querySelector(":scope > .dropdown-menu");
-           toggleDropdown(openDropdown, menu, false);
-         }
-       });
-     };
+    document.addEventListener("DOMContentLoaded", () => {
+      const toggleDropdown = (dropdown, menu, isOpen) => {
+        if (!menu) return;
+        if (isOpen) {
+          dropdown.classList.add("open");
+        } else {
+          dropdown.classList.remove("open");
+        }
+      };
+    
+      const closeAllDropdowns = (except = null) => {
+      document.querySelectorAll(".dropdown-container.open").forEach((openDropdown) => {
+        if (openDropdown !== except) {
+          const menu = openDropdown.querySelector(":scope > .dropdown-menu");
+          toggleDropdown(openDropdown, menu, false);
+        }
+      });
+    };
    
      const getOwnMenuForToggle = (toggleEl) => {
        const parentLi = toggleEl.closest("li");
@@ -923,7 +915,9 @@
        }
      }
    
-     window.addEventListener("resize", adjustAllOpenDropdownHeights);
+      window.addEventListener("resize", () => {
+        // No need to adjust heights with max-height approach
+      });
    
      // --------------------
      // ✅ Auto-activate current link + open dropdowns
@@ -947,23 +941,17 @@
          bestMatchLength = linkUrl.length;
        }
      }
-   });
-   
-   if (bestMatch) {
-     bestMatch.classList.add("active");
-   
-     // Highlight its dropdown parents
-     let parentDropdown = bestMatch.closest(".dropdown-container");
-     while (parentDropdown) {
-       const menu = parentDropdown.querySelector(":scope > .dropdown-menu");
-       if (menu) {
-         parentDropdown.classList.add("open");
-         menu.style.height = `${menu.scrollHeight}px`;
-       }
-       parentDropdown = parentDropdown.parentElement.closest(".dropdown-container");
-     }
-   }
-   
-   adjustAllOpenDropdownHeights();
-   });
-</script>
+   });    
+    if (bestMatch) {
+      bestMatch.classList.add("active");
+    
+      // Highlight its dropdown parents
+      let parentDropdown = bestMatch.closest(".dropdown-container");
+      while (parentDropdown) {
+        parentDropdown.classList.add("open");
+        parentDropdown = parentDropdown.parentElement.closest(".dropdown-container");
+      }
+    }
+    
+    });
+  </script>

@@ -218,11 +218,6 @@ class UserResource extends Resource
                   Tables\Actions\ViewAction::make()->button()->color('warning')->label('')->iconbutton()->tooltip('View User'),
                   Tables\Actions\EditAction::make()->button()->color('stripe')->label('')->iconbutton()->tooltip('Edit User'),
                   Tables\Actions\DeleteAction::make()->button()->color('danger')->label('')->iconbutton()->tooltip('Delete User'),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

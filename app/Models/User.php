@@ -69,6 +69,14 @@ class User extends Authenticatable
         ];
     }
 
+    public function getDobAttribute($value)
+    {
+        if ($value) {
+            return \Carbon\Carbon::parse($value);
+        }
+        return $value;
+    }
+
     public function staffProfile()
     {
         return $this->hasOne(StaffProfile::class);

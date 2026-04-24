@@ -1876,11 +1876,22 @@ if (($newShift->add_to_job_board == 0) && ($newShift->is_vacant == 0)) {
 
         $hours = $shiftStart->floatDiffInHours($shiftEnd);
 
-        $dayType = match ($shiftDate->format('l')) {
-            'Saturday' => 'Saturday',
-            'Sunday'   => 'Sunday',
-            default    => 'Weekdays - I',
-        };
+         $dayOfWeek = $shiftDate->format('l');
+         $companyId = Company::where('user_id', Auth::id())->value('id');
+         $isPublicHoliday = in_array($shiftDate->toDateString(), \App\Models\PublicHoliday::where('company_id', $companyId)
+             ->where('status', 'Active')
+             ->pluck('date')
+             ->toArray());
+         
+         if ($isPublicHoliday) {
+             $dayType = 'Public Holidays';
+         } else {
+             $dayType = match ($dayOfWeek) {
+                 'Saturday' => 'Saturday',
+                 'Sunday'   => 'Sunday',
+                 default    => 'Weekdays - I',
+             };
+         }
 
         $fetchPriceBook = PriceBook::where('id', $priceBookId)->first();
 

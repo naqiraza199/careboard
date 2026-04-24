@@ -178,11 +178,6 @@ Forms\Components\Select::make('clients')
             ->actions([
                 Tables\Actions\EditAction::make()->button()->color('stripe')->label('')->iconbutton()->tooltip('Edit Team'),
                 Tables\Actions\DeleteAction::make()->button()->color('darkk')->label('')->iconbutton()->tooltip('Delete Team'),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

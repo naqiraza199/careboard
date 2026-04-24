@@ -411,11 +411,11 @@ class ClientResource extends Resource
                             ->schema([
                                 Forms\Components\Grid::make(['default' => 3])
                                     ->schema([
-                                        Forms\Components\TextInput::make('NDIS_number')->placeholder('Enter NDIS Number')->columnSpan(1),
-                                        Forms\Components\TextInput::make('aged_care_recipient_ID')->placeholder('Enter Aged Care Recipient ID')->columnSpan(1),
-                                        Forms\Components\TextInput::make('reference_number')->placeholder('Enter Reference Number')->columnSpan(1),
-                                        Forms\Components\TextInput::make('custom_field')->placeholder('Enter Custom Field')->columnSpan(1),
-                                        Forms\Components\TextInput::make('PO_number')->placeholder('Enter PO Number')->columnSpan(1),
+                                        Forms\Components\TextInput::make('NDIS_number')->label('NDIS Number')->placeholder('Enter NDIS Number')->columnSpan(1),
+                                        Forms\Components\TextInput::make('aged_care_recipient_ID')->label('Aged Care Recipient ID')->placeholder('Enter Aged Care Recipient ID')->columnSpan(1),
+                                        Forms\Components\TextInput::make('reference_number')->label('Reference Number')->placeholder('Enter Reference Number')->columnSpan(1),
+                                        Forms\Components\TextInput::make('custom_field')->label('Custom Field')->placeholder('Enter Custom Field')->columnSpan(1),
+                                        Forms\Components\TextInput::make('PO_number')->label('PO Number')->placeholder('Enter PO Number')->columnSpan(1),
                                         Forms\Components\Select::make('client_type_id')
                                             ->label('Client Type')
                                             ->placeholder('Select Client Type')
@@ -563,11 +563,6 @@ class ClientResource extends Resource
                             ->body('Client Archived Successfully')
                             ->send();
                     }),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    // Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 
@@ -872,7 +867,7 @@ $fields[] = Forms\Components\Section::make('Price Books')
                     ->extraAttributes(['style' => 'background: transparent; border: none; box-shadow: none;margin: -22px;']),
 Section::make('')
 ->schema([
-Section::make('Additional Information')
+Section::make('Additional Contacts')
                             ->extraAttributes(['style' => 'border-radius: 0px;'])
     ->schema(fn ($record) =>
         $record->additionalContacts()
@@ -966,9 +961,9 @@ Section::make('Additional Information')
                             ->columnSpan(2),
                         Forms\Components\Fieldset::make('Client Info')
                             ->schema([
-                                Forms\Components\TextInput::make('first_name')->label('First name')->placeholder('Enter First Name')->required(),
-                                Forms\Components\TextInput::make('last_name')->label('Last name')->placeholder('Enter Last/Family Name')->required(),
-                                Forms\Components\TextInput::make('email')->email()->label('Email Address')->placeholder('Enter Email')->required()->columnSpanFull(),
+                                Forms\Components\TextInput::make('first_name')->label('First name')->placeholder('Enter First Name'),
+                                Forms\Components\TextInput::make('last_name')->label('Last name')->placeholder('Enter Last/Family Name'),
+                                Forms\Components\TextInput::make('email')->email()->label('Email Address')->placeholder('Enter Email')->columnSpanFull(),
                             ])
                             ->columnSpan(3)
                             ->columns(2),
@@ -1078,9 +1073,9 @@ Section::make('Additional Information')
                             ->columnSpan(2),
                         Forms\Components\Fieldset::make('Client Info')
                             ->schema([
-                                Forms\Components\TextInput::make('first_name')->label('First name')->placeholder('Enter First Name')->required(),
-                                Forms\Components\TextInput::make('last_name')->label('Last name')->placeholder('Enter Last/Family Name')->required(),
-                                Forms\Components\TextInput::make('email')->email()->label('Email Address')->placeholder('Enter Email')->required()->columnSpanFull(),
+                                Forms\Components\TextInput::make('first_name')->label('First name')->placeholder('Enter First Name'),
+                                Forms\Components\TextInput::make('last_name')->label('Last name')->placeholder('Enter Last/Family Name'),
+                                Forms\Components\TextInput::make('email')->email()->label('Email Address')->placeholder('Enter Email')->columnSpanFull(),
                             ])
                             ->columnSpan(3)
                             ->columns(2),

@@ -76,11 +76,6 @@ class RoleResource extends Resource
                 Tables\Actions\ViewAction::make()->button()->color('warning')->label('')->iconbutton()->tooltip('View Role'),
                 Tables\Actions\EditAction::make()->button()->color('stripe')->label('')->iconbutton()->tooltip('Edit Role')->slideOver(),
                 Tables\Actions\DeleteAction::make()->button()->color('darkk')->label('')->iconbutton()->tooltip('Delete Role'),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
             ]);
     }
 

@@ -662,6 +662,16 @@ class EditAdvancedShiftForm extends Page implements HasForms
                                     ->label('Pay Group')
                                     ->options(PayGroup::where('user_id', auth()->id())->where('is_archive', 0)->pluck('name', 'id'))
                                     ->default(fn ($get) => $get('pay_group_id')),
+                                TimePicker::make('user_start_time')
+                                    ->label('Start Time')
+                                    ->format('h:i A')
+                                    ->displayFormat('h:i A')
+                                    ->default(fn ($get) => $get('user_start_time') ?? '02:00 AM'),
+                                TimePicker::make('user_end_time')
+                                    ->label('End Time')
+                                    ->format('h:i A')
+                                    ->displayFormat('h:i A')
+                                    ->default(fn ($get) => $get('user_end_time') ?? '03:00 AM'),
                                 View::make('edit-user-start-time-init')
                                     ->view('filament.forms.components.time-js-initializer')
                                     ->viewData(fn ($get) => ['fieldId' => 'edit-user-start-time-input-' . $get('user_id') ?? 'default']),
@@ -869,13 +879,23 @@ $previousAddToJobBoard = $this->shift->add_to_job_board;
 
 ];
 
-$shiftDate = \Carbon\Carbon::parse($data['start_date']);
-$dayOfWeek = $shiftDate->format('l');
-$dayType = match ($dayOfWeek) {
-    'Saturday' => 'Saturday',
-    'Sunday'   => 'Sunday',
-    default    => 'Weekdays - I',
-};
+        $shiftDate = \Carbon\Carbon::parse($data['start_date']);
+        $dayOfWeek = $shiftDate->format('l');
+        $companyId = Company::where('user_id', Auth::id())->value('id');
+        $isPublicHoliday = in_array($shiftDate->toDateString(), \App\Models\PublicHoliday::where('company_id', $companyId)
+            ->where('status', 'Active')
+            ->pluck('date')
+            ->toArray());
+        
+        if ($isPublicHoliday) {
+            $dayType = 'Public Holidays';
+        } else {
+            $dayType = match ($dayOfWeek) {
+                'Saturday' => 'Saturday',
+                'Sunday'   => 'Sunday',
+                default    => 'Weekdays - I',
+            };
+        }
 
 $clientDetails = $data['client_details'] ?? [];
 

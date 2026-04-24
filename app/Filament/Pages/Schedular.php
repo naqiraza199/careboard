@@ -1487,13 +1487,19 @@ class Schedular extends Page
                     $hoursXRate = 'Fixed: $'.number_format($totalCost, 2);
                     $displayHours = 'Fixed price';
                 } else {
-                    // ─── HOURLY LOGIC REMAINS 100% UNCHANGED ───
-                    $dayOfWeek = $shiftDate->format('l');
-                    $dayType = match ($dayOfWeek) {
-                        'Saturday' => 'Saturday',
-                        'Sunday' => 'Sunday',
-                        default => 'Weekdays - I',
-                    };
+                 // ─── HOURLY LOGIC WITH PUBLIC HOLIDAY CHECK ───
+                 $dayOfWeek = $shiftDate->format('l');
+                 $isPublicHoliday = in_array($shiftDate->toDateString(), $this->publicHolidays);
+                 
+                 if ($isPublicHoliday) {
+                     $dayType = 'Public Holidays';
+                 } else {
+                     $dayType = match ($dayOfWeek) {
+                         'Saturday' => 'Saturday',
+                         'Sunday' => 'Sunday',
+                         default => 'Weekdays - I',
+                     };
+                 }
 
                     $priceDetail = PriceBookDetail::where('price_book_id', $priceBookId)
                         ->where('day_of_week', $dayType)

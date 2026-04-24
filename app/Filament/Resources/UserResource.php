@@ -245,6 +245,8 @@ public static function getEloquentQuery(): Builder
 
                                 DatePicker::make('dob')
                                     ->label('Date Of Birth')
+                                    ->format('d F Y')
+                                    ->locale('en')
                                     ->columnSpan(1)
                                     ->extraInputAttributes([
                                                 'id' => 'dob-input',
@@ -718,11 +720,6 @@ public static function getEloquentQuery(): Builder
                         }
                     }),
 
-            ])
-            ->bulkActions([
-                // Tables\Actions\BulkActionGroup::make([
-                //     Tables\Actions\DeleteBulkAction::make(),
-                // ]),
             ]);
     }
 
