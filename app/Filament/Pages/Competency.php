@@ -90,8 +90,34 @@ class Competency extends Page implements Tables\Contracts\HasTable
                     })
                     ->badge()
                     ->colors([
-                        'rado' => fn ($state): bool => $state === 'No Expiration' || $state !== '-',
+                        // No Expiration - keep existing color
+                        'rado' => fn ($state): bool => $state === 'No Expiration',
+                        // No date - keep existing color
                         'blackk' => fn ($state): bool => $state === '-' || $state === null,
+                        // Expired dates (past) - red
+                        'danger' => function ($state): bool {
+                            if ($state === 'No Expiration' || $state === '-' || $state === null) {
+                                return false;
+                            }
+                            try {
+                                $date = Carbon::createFromFormat('d/m/Y', $state);
+                                return $date && $date->lt(Carbon::now()->startOfDay());
+                            } catch (\Exception $e) {
+                                return false;
+                            }
+                        },
+                        // Future/upcoming dates - green
+                        'success' => function ($state): bool {
+                            if ($state === 'No Expiration' || $state === '-' || $state === null) {
+                                return false;
+                            }
+                            try {
+                                $date = Carbon::createFromFormat('d/m/Y', $state);
+                                return $date && $date->gte(Carbon::now()->startOfDay());
+                            } catch (\Exception $e) {
+                                return false;
+                            }
+                        },
                     ])
                 ->sortable();
         })->toArray()));

@@ -1,4 +1,4 @@
-<x-filament-panels::page>
+<x-filament::page>
     <style>
     /* Expired status row styling */
     .expired-row {
@@ -32,4 +32,4 @@
     </style>
 
     {{ $this->table }}
-</x-filament-panels::page>
+</x-filament::page>

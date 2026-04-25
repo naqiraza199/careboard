@@ -10,6 +10,8 @@ class ListMediaManagers extends ListRecords
 {
     protected static string $resource = MediaManagerResource::class;
 
+    protected static string $view = 'filament.resources.pages.list-media-managers';
+
     protected function getHeaderActions(): array
     {
         return [

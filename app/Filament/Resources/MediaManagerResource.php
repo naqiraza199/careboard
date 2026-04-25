@@ -53,13 +53,13 @@ class MediaManagerResource extends Resource
         return false;
     }
 
-public static function getEloquentQuery(): Builder
+ public static function getEloquentQuery(): Builder
 {
     $authUser = auth()->user();
 
     return parent::getEloquentQuery()
         ->with(['user:id,name','documentCategory:id,name'])
-        ->select(['id','user_id','document_category_id','type','name','expired_at','created_at','updated_at'])
+        ->select(['id','user_id','document_category_id','type','name','expired_at','no_expiration','created_at','updated_at'])
         ->where('user_id', $authUser->id) // <-- use where, not whereIn
         ->whereNull('client_id');
 }
@@ -78,6 +78,9 @@ public static function getEloquentQuery(): Builder
             ->deferLoading()
             ->paginated([25, 50, 100])
             ->defaultPaginationPageOption(25)
+            ->recordClasses(fn (Document $record): array => [
+                'expired-row' => !$record->no_expiration && $record->expired_at && Carbon::now()->greaterThan($record->expired_at),
+            ])
             ->columns([
                 
                 Tables\Columns\TextColumn::make('user.name')

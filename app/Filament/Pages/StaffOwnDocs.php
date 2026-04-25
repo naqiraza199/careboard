@@ -76,6 +76,9 @@ class StaffOwnDocs extends Page implements Tables\Contracts\HasTable
             ->query(fn (): Builder =>
                 Document::query()->where('user_id', $this->userId)
             )
+            ->recordClasses(fn (Document $record): array => [
+                'expired-row' => !$record->no_expiration && $record->expired_at && Carbon::now()->greaterThan($record->expired_at),
+            ])
             ->columns([
                 // Tables\Columns\TextColumn::make('user.name')->label('Name')->searchable(),
 

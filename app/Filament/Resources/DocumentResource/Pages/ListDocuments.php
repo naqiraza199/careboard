@@ -10,6 +10,8 @@ class ListDocuments extends ListRecords
 {
     protected static string $resource = DocumentResource::class;
 
+    protected static string $view = 'filament.resources.pages.list-documents';
+
     protected function getHeaderActions(): array
     {
         return [

@@ -170,9 +170,12 @@ class ClientResource extends Resource
                                             'Female' => 'Female',
                                             'Other' => 'Other',
                                         ])->columnSpan(1),
-                                        Forms\Components\DatePicker::make('dob')->label('Date Of Birth')->columnSpan(1)
-                                    ->extraInputAttributes(['id' => 'dob-input-client',
-                                                'wire:ignore' => true,]), // <-- Unique ID is required!
+                                            Forms\Components\DatePicker::make('dob')
+                                ->label('Date Of Birth')
+                                ->native(false)
+                                ->format('Y-m-d')
+                                ->displayFormat('d F Y')
+                                ->locale('en'),
 
                                         Forms\Components\Select::make('marital_status')->options([
                                             'Single' => 'Single',

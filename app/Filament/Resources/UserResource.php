@@ -240,18 +240,12 @@ public static function getEloquentQuery(): Builder
                                 ])->columnSpan(1),
                                 // In your Filament Resource or Page Schema
 
-
-
-
-                                DatePicker::make('dob')
-                                    ->label('Date Of Birth')
-                                    ->format('d F Y')
-                                    ->locale('en')
-                                    ->columnSpan(1)
-                                    ->extraInputAttributes([
-                                                'id' => 'dob-input',
-                                                'wire:ignore' => true,   // ✅ THIS IS CRITICAL
-                                    ]),
+DatePicker::make('dob')
+    ->label('Date Of Birth')
+    ->native(false)
+    ->format('Y-m-d')
+    ->displayFormat('d F Y')
+    ->locale('en'),
 
 
 

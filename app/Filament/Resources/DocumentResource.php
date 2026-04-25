@@ -111,6 +111,9 @@ class DocumentResource extends Resource
             ->deferLoading()
             ->paginated([25, 50, 100])
             ->defaultPaginationPageOption(25)
+            ->recordClasses(fn (Document $record): array => [
+                'expired-row' => !$record->no_expiration && $record->expired_at && Carbon::now()->greaterThan($record->expired_at),
+            ])
             ->columns([
                 
                 Tables\Columns\TextColumn::make('user.name')
