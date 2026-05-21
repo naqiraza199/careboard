@@ -24,7 +24,7 @@
                                         <div class="value">{{ $paygroup->name ?? '--' }}</div>
                                     </div>
 
-                                    {{-- <div class="row-flex">
+                                    <div class="row-flex">
                                         <div class="label">Time</div>
                                         <div class="value-c">
                                             <b>
@@ -33,7 +33,7 @@
                                                 {{ !empty($detail['user_end_time']) ? \Carbon\Carbon::parse($detail['user_end_time'])->format('h:i a') : '--' }}
                                             </b>
                                         </div>
-                                    </div>  --}}
+                                    </div>
                                  {{-- @php
                                         $start = !empty($detail['user_start_time']) ? \Carbon\Carbon::parse($detail['user_start_time']) : null;
                                         $end   = !empty($detail['user_end_time']) ? \Carbon\Carbon::parse($detail['user_end_time']) : null;

@@ -9,7 +9,9 @@ use App\Models\InvoicePayment;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\BillingReport;
 use App\Models\Event;
+use App\Models\Shift;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\InvoiceMail;
 use Illuminate\Support\Facades\Auth;
@@ -181,17 +183,48 @@ public function update(Request $request, Invoice $invoice)
             return back()->with('error', 'Invoice already voided.');
         }
 
+        // Get the billing report IDs linked to this invoice
+        $billingReportIds = is_string($invoice->billing_reports_ids)
+            ? json_decode($invoice->billing_reports_ids, true)
+            : ($invoice->billing_reports_ids ?? []);
+
+        // Get shift IDs from those billing reports
+        $shiftIds = BillingReport::whereIn('id', $billingReportIds)
+            ->pluck('shift_id')
+            ->filter()
+            ->unique()
+            ->toArray();
+
+        // Revert billing reports back to Unpaid
+        BillingReport::whereIn('id', $billingReportIds)->update([
+            'status' => 'Unpaid',
+        ]);
+
+        // Revert shifts back to Approved
+        Shift::whereIn('id', $shiftIds)->update([
+            'status' => 'Booked',
+        ]);
+
+        // Mark invoice as void
         $invoice->update([
             'is_void' => 1,
         ]);
 
-         Notification::make()
-            ->title('Invoice Void')
-            ->body('Invoice has been voided successfully.')
+        // Log event
+        Event::create([
+            'invoice_id' => $invoice->id,
+            'title'      => Auth::user()->name . ' Voided Invoice',
+            'from'       => 'Invoice',
+            'body'       => 'Invoice voided — billing reports reverted to Unpaid, shifts reverted to Approved.',
+        ]);
+
+        Notification::make()
+            ->title('Invoice Voided')
+            ->body('Invoice voided. Billing reports set back to Unpaid and shifts set back to Approved.')
             ->success()
             ->send();
 
-        return redirect()->route('filament.admin.pages.invoice-list');;
+        return redirect()->route('filament.admin.pages.invoice-list');
     }
 
 

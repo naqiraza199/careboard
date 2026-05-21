@@ -86,6 +86,7 @@ class StaffCalender extends Page
     public $shiftTypeNames;
     public $display_name;
     public $userId;
+    public $publicHolidays = [];
 
     public bool $showTaskModal = false;
     public ?int $shiftId = null;
@@ -242,6 +243,11 @@ class StaffCalender extends Page
 
     $this->shiftTypes = ShiftType::where('user_id', $authUserId)->get();
     $this->shiftTypeNames = $this->shiftTypes->pluck('name', 'id')->toArray();
+
+    $this->publicHolidays = \App\Models\PublicHoliday::where('company_id', $companyId)
+        ->where('status', 'Active')
+        ->pluck('date')
+        ->toArray();
 }
 
 public function getUsersProperty()

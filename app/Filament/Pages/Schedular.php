@@ -233,6 +233,8 @@ class Schedular extends Page
                     'series_uuid' => $shift->series_uuid ?? null,
                     'repeat_tooltip' => $shift->repeat_tooltip ?? '',
                     'is_sleepover' => $this->isSleepoverShift($shiftSection['shift_type_id'] ?? null),
+                    'client_details' => $shift->is_advanced_shift ? ($clientSection['client_details'] ?? []) : null,
+                    'user_details' => $shift->is_advanced_shift ? ($carerSection['user_details'] ?? []) : null,
                 ];
 
                 // Handle shifts based on is_advanced_shift
@@ -585,55 +587,11 @@ class Schedular extends Page
 
                                 Checkbox::make('shift_finishes_next_day')
                                     ->label('Shift finishes the next day')
-                                    ->reactive()
+                                    ->extraAttributes(['@change' => '$dispatch("shift-next-day-toggled", {checked: $event.target.checked})'])
                                     ->columnSpan(2),
 
-                                Placeholder::make('shift_info')
-                                    ->label('')
-                                    ->content(function (Get $get) {
-                                        $startDate = $get('start_date');
-                                        $startTime = $get('start_time');
-                                        $endTime = $get('end_time');
-                                        $finishesNextDay = (bool) $get('shift_finishes_next_day');
-
-                                        // If any required field is missing → show nothing
-                                        if (! $startDate || ! $startTime || ! $endTime) {
-                                            return '';
-                                        }
-
-                                        // Parse dates & times
-                                        $start = Carbon::parse("$startDate $startTime");
-                                        $end = Carbon::parse("$startDate $endTime");
-
-                                        // If overnight shift is marked → add one day to end
-                                        if ($finishesNextDay) {
-                                            $end = $end->addDay();
-                                        }
-
-                                        // Calculate hours (always correct now)
-                                        $hours = $start->floatDiffInHours($end);
-
-                                        // Show the **finishing date** correctly
-                                        $displayDate = $finishesNextDay
-                                            ? Carbon::parse($startDate)->addDay()->format('d/m/Y')
-                                            : Carbon::parse($startDate)->format('d/m/Y');
-
-                                        // Build message
-                                        $message = 'This shift is '.number_format($hours, 1).' hours';
-
-                                        if ($finishesNextDay) {
-                                            $message .= ', finishing next day';
-                                        }
-
-                                        $message .= ", $displayDate.";
-
-                                        return $message;
-                                    })
-                                        // Only show this placeholder when overnight is checked
-                                    ->visible(fn (Get $get) => (bool) $get('shift_finishes_next_day'))
-                                    ->extraAttributes([
-                                        'style' => 'text-align: right; color: black;',
-                                    ])
+                                View::make('shift-next-day-info-view')
+                                    ->view('filament.forms.components.shift-next-day-info')
                                     ->columnSpan(5),
 
                             ]),
@@ -1437,14 +1395,16 @@ class Schedular extends Page
                         $staffUser = User::find($staffUserId);
 
                         if ($staffUser && $staffUser->email) {
-                            try {
-                                Mail::to($staffUser->email)->send(new ShiftAssignment($newShift, $staffUser, $authUser));
-                                // Add delay to avoid rate limiting
-                                usleep(500000); // 0.5 second delay between emails
-                            } catch (\Exception $e) {
-                                // Log error but don't break shift creation
-                                \Log::error('Failed to send shift assignment email: '.$e->getMessage());
-                            }
+                            $shiftForMail = $newShift;
+                            $staffUserForMail = $staffUser;
+                            $authUserForMail = $authUser;
+                            dispatch(function () use ($shiftForMail, $staffUserForMail, $authUserForMail) {
+                                try {
+                                    Mail::to($staffUserForMail->email)->send(new ShiftAssignment($shiftForMail, $staffUserForMail, $authUserForMail));
+                                } catch (\Exception $e) {
+                                    \Log::error('Failed to send shift assignment email: '.$e->getMessage());
+                                }
+                            })->afterResponse();
                         }
                     }
                 }
@@ -1574,8 +1534,6 @@ class Schedular extends Page
                 // -------------------------------------------------------------
                 // 🧾 Create Timesheet (Detailed Logic)
                 // -------------------------------------------------------------
-                $authUser = Auth::user();
-                $companyId = Company::where('user_id', $authUser->id)->value('id');
                 $userId = data_get($data, 'carer_section.user_id');
                 $shiftStart = Carbon::parse(data_get($data, 'time_and_location.start_time'));
                 $shiftEnd = Carbon::parse(data_get($data, 'time_and_location.end_time'));

@@ -76,24 +76,29 @@ class TaxFree extends Page
         $this->billingReports = \App\Models\BillingReport::whereIn('id', $this->billing_ids)
             ->get()
             ->map(function ($report) {
-                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'x') !== false) {
-                    [$hours, $rate] = array_map('trim', explode('x', $report->hours_x_rate, 2));
-                    
+                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, ' x ') !== false) {
+                    [$hours, $rate] = array_map('trim', explode(' x ', $report->hours_x_rate, 2));
+
 
                     $hours = (float) $hours;
                     $rateValue = (float) str_replace(['$', ','], '', $rate);
 
-                    $report->hours = $hours;    
-                    $report->rate = $rate; 
-                    $report->hours_total = $hours * $rateValue;    
+                    $report->hours = $hours;
+                    $report->rate = $rate;
+                    $report->hours_total = $hours * $rateValue;
+                } elseif (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'Fixed:') !== false) {
+                    $fixedAmount = trim(str_replace('Fixed:', '', $report->hours_x_rate));
+                    $report->hours = null;
+                    $report->rate = $fixedAmount;
+                    $report->hours_total = (float) str_replace(['$', ','], '', $fixedAmount);
                 } else {
                     $report->hours = null;
                     $report->rate = null;
                     $report->hours_total = null;
                 }
 
-                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, 'x') !== false) {
-                    [$distance, $rate] = array_map('trim', explode('x', $report->distance_x_rate, 2));
+                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, ' x ') !== false) {
+                    [$distance, $rate] = array_map('trim', explode(' x ', $report->distance_x_rate, 2));
 
                     $distance = (float) $distance;
                     $rateValue = (float) str_replace(['$', ','], '', $rate);
@@ -137,8 +142,8 @@ class TaxFree extends Page
                 $this->grandTotal = 0;
             }
 
-            $this->issue_date = now()->format('Y-m-d');
-            $this->payment_due = now()->addDays(14)->format('Y-m-d');
+            $this->issue_date = now()->format('d-m-Y');
+            $this->payment_due = now()->addDays(14)->format('d-m-Y');
             $this->ref_no = str_pad(rand(100000000, 999999999), 9, '0', STR_PAD_LEFT);
 
 
@@ -162,18 +167,21 @@ public function createInvoice()
         ->get()
         ->map(function ($report) {
             // Parse hours_x_rate → e.g., "8 x $95.00"
-            if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'x') !== false) {
-                [$hours, $rate] = array_map('trim', explode('x', $report->hours_x_rate, 2));
+            if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, ' x ') !== false) {
+                [$hours, $rate] = array_map('trim', explode(' x ', $report->hours_x_rate, 2));
                 $report->hours = (float) $hours;
                 $report->rate  = $rate;
+            } elseif (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'Fixed:') !== false) {
+                $report->hours = null;
+                $report->rate  = trim(str_replace('Fixed:', '', $report->hours_x_rate));
             } else {
                 $report->hours = null;
                 $report->rate  = null;
             }
 
             // Parse distance_x_rate
-            if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, 'x') !== false) {
-                [$distance, $rate] = array_map('trim', explode('x', $report->distance_x_rate, 2));
+            if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, ' x ') !== false) {
+                [$distance, $rate] = array_map('trim', explode(' x ', $report->distance_x_rate, 2));
                 $report->distance       = (float) $distance;
                 $report->distance_rate  = $rate;
             } else {
@@ -297,7 +305,7 @@ public function createInvoice()
         'invoice_sequence'      => $sequence,
         'invoice_no'            => str_pad($sequence, 7, '0', STR_PAD_LEFT),
         'issue_date'            => now()->toDateString(),
-        'payment_due'           => $this->payment_due,
+        'payment_due'           => \Carbon\Carbon::createFromFormat('d-m-Y', $this->payment_due)->format('Y-m-d'),
         'purchase_order'        => $this->purchase_order,
         'additional_contact_id' => $this->additional_contact_id === 'client' ? null : $this->additional_contact_id,
         'ndis'                  => $this->ref_no,

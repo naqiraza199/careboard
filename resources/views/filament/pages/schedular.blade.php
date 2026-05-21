@@ -508,6 +508,7 @@
             height: 100px;
              border-top-right-radius: 0px !important;
             border-bottom-right-radius: 0px !important;
+            position: relative;
         }
         .calendar-day {
                     min-height: auto;
@@ -1072,6 +1073,33 @@ body.sidebar-collapsed .main-content-sidebar {
 .staff-cell.clickable:hover .label-badge, .client-staff-label.clickable:hover .label-badge { background: #60a5fa !important; }
 .staff-cell.clickable:hover .label-text, .client-staff-label.clickable:hover .label-text { color: white !important; }
 
+/* Sleepover shift: dark block */
+.task.task-sleepover {
+    background: #0f172a !important;
+    border-left-color: #1e293b !important;
+    color: #f1f5f9 !important;
+}
+.task.task-sleepover strong {
+    color: #94a3b8 !important;
+}
+.task.task-sleepover small,
+.task.task-sleepover > div {
+    color: #cbd5e1 !important;
+}
+/* Moon icon - sleepover */
+.sleepover-moon-icon {
+    position: absolute;
+    bottom: 4px;
+    left: 8px;
+    font-size: 13px;
+    color: #7c3aed;
+    line-height: 1;
+    z-index: 1;
+}
+.task.task-sleepover .sleepover-moon-icon {
+    color: #c4b5fd;
+}
+
     </style>
 
     <div wire:ignore.self x-data="{ calendarType: 'client', viewType: 'Weekly' }">
@@ -1255,10 +1283,23 @@ body.sidebar-collapsed .main-content-sidebar {
 
             function formatTime(time) {
                 if (!time) return '';
-                const [hours, minutes] = time.split(':').map(Number);
+                // Handle 12-hour format: "6:00 AM", "06:00 PM", etc.
+                const amPmMatch = time.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+                if (amPmMatch) {
+                    let h = parseInt(amPmMatch[1]);
+                    const m = parseInt(amPmMatch[2]);
+                    const meridiem = amPmMatch[3].toUpperCase();
+                    if (meridiem === 'PM' && h !== 12) h += 12;
+                    if (meridiem === 'AM' && h === 12) h = 0;
+                    const period = h >= 12 ? 'pm' : 'am';
+                    return `${h % 12 || 12}:${m.toString().padStart(2, '0')}${period}`;
+                }
+                // Handle 24-hour format: "06:00", "06:00:00"
+                const parts = time.split(':').map(Number);
+                const hours = parts[0], minutes = parts[1];
+                if (isNaN(hours) || isNaN(minutes)) return time;
                 const period = hours >= 12 ? 'pm' : 'am';
-                const formattedHours = hours % 12 || 12;
-                return `${formattedHours}:${minutes.toString().padStart(2, '0')}${period}`;
+                return `${hours % 12 || 12}:${minutes.toString().padStart(2, '0')}${period}`;
             }
 
             function getStatusIcon(status) {
@@ -1279,9 +1320,9 @@ body.sidebar-collapsed .main-content-sidebar {
             function getSeriesIcon(shift) {
                                 if (!shift.series_uuid) return '';
 
-                                const count = shifts.filter(s => s.series_uuid === shift.series_uuid).length;
+                                const uniqueIds = new Set(shifts.filter(s => s.series_uuid === shift.series_uuid).map(s => s.id));
 
-                                if (count > 1) {
+                                if (uniqueIds.size > 1) {
                                     return `<span style="position:absolute;top:30px;right:5px;"
                                                 class="series-icon"
                                                 title="${shift.repeat_tooltip}">
@@ -1293,10 +1334,14 @@ body.sidebar-collapsed .main-content-sidebar {
                             }
 
             function getSleepoverIcon(shift) {
-                if (shift.is_sleepover) {
-                    return '<span style="margin-left: 5px;color:black;position: absolute;bottom: 5px;right: 5px;" title="Sleepover Shift"><i class="fa-solid fa-moon"></i></span>';
+                if (isSleepoverShift(shift)) {
+                    return '<span class="sleepover-moon-icon" title="Sleepover Shift"><i class="fa-solid fa-moon"></i></span>';
                 }
                 return '';
+            }
+
+            function isSleepoverShift(shift) {
+                return shift.is_sleepover || shiftTypeNames[String(shift.shift_type_id)] === 'Sleepover';
             }
 
 
@@ -1463,6 +1508,7 @@ function renderStaffCalendar(filteredShifts = shifts) {
                 if (shift.is_vacant) cls = 'task daily task-vacant';
                 else if (shift.add_to_job_board) cls = 'task daily task-jobboard';
                 else if (shift.is_advanced_shift) cls = 'task daily task-advanced';
+                if (isSleepoverShift(shift)) cls += ' task-sleepover';
 
                 const taskDiv = document.createElement('div');
                 taskDiv.className = cls;
@@ -1534,27 +1580,33 @@ function renderStaffCalendar(filteredShifts = shifts) {
             const grouped = Object.values(Object.fromEntries(userShifts.map(s => [s.id, s])));
 
             grouped.forEach(shift => {
-                const { startMinutes, durationMinutes, totalMinutes } = calculateShiftPosition(shift, startDate);
+                const userDetailsArr = Array.isArray(shift.user_details) ? shift.user_details : Object.values(shift.user_details || {});
+                const userEntry = userDetailsArr.find(d => String(d.user_id) === String(userId));
+                const staffStart = (userEntry && userEntry.user_start_time) ? userEntry.user_start_time : shift.start_time;
+                const staffEnd = (userEntry && userEntry.user_end_time) ? userEntry.user_end_time : shift.end_time;
+                const fakeShift = { ...shift, start_time: staffStart, end_time: staffEnd };
+                const { startMinutes, durationMinutes, totalMinutes } = calculateShiftPosition(fakeShift, startDate);
 
                 const taskDiv = document.createElement('div');
                 let cls = 'task daily default';
                 if (shift.is_vacant) cls = 'task daily task-vacant';
                 else if (shift.is_advanced_shift) cls = 'task daily task-advanced';
                 else if (shift.add_to_job_board) cls = 'task daily task-jobboard';
+                if (isSleepoverShift(fakeShift)) cls += ' task-sleepover';
                 taskDiv.className = cls;
 
                 taskDiv.style.left = `${(startMinutes / totalMinutes) * 100}%`;
                 taskDiv.style.width = `${Math.min((durationMinutes / totalMinutes) * 100, 100)}%`;
 
-                const timeRange =
-                    shift.start_time && shift.end_time
-                        ? `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`
-                        : 'No Time';
+                const timeRange = staffStart && staffEnd
+                    ? `${formatTime(staffStart)} - ${formatTime(staffEnd)}`
+                    : 'No Time';
+                const splitBadge = shift.is_split ? ' <span style="font-size:11px;color:#13b982;">✂</span>' : '';
                 const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
                 const clientName = clientNames[String(shift.client_id)] || '';
 
                 taskDiv.innerHTML = `
-                    <strong>${timeRange}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong>
+                    <strong>${timeRange}${splitBadge}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong>
                     <div>${shiftType}</div>
                     <div class="small-text">${clientName}</div>
                 `;
@@ -1648,6 +1700,7 @@ relevant.forEach(shift => {
         if (shift.is_vacant) cls = 'task task-vacant';
         else if (shift.add_to_job_board) cls = 'task task-jobboard';
         else if (shift.is_advanced_shift) cls = 'task task-advanced';
+        if (isSleepoverShift(shift)) cls += ' task-sleepover';
         div.className = cls;
 
         const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
@@ -1666,7 +1719,7 @@ relevant.forEach(shift => {
         }
 
         div.innerHTML = `
-            <strong>${timeRange} ${shift.is_split ? '<span style="color: #13b982;">&#9986;</span>' : ''}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
+            <strong>${timeRange}${shift.is_split ? ' <span style="font-size:11px;color:#13b982;">✂</span>' : ''}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
             ${shiftType}<br>
             ${clientHtml}
         `;
@@ -1683,6 +1736,7 @@ relevant.forEach(shift => {
     if (shift.is_vacant) cls1 = 'task task-vacant';
     else if (shift.add_to_job_board) cls1 = 'task task-jobboard';
     else if (shift.is_advanced_shift) cls1 = 'task task-advanced';
+    if (isSleepoverShift(shift)) cls1 += ' task-sleepover';
     part1.className = cls1 + ' overnight-start';
 
     const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
@@ -1699,7 +1753,7 @@ relevant.forEach(shift => {
 
     part1.innerHTML = `
         <strong>NEXT DAY</strong><br>
-        <strong>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br><spam>${shift.is_split ? '<span style="color: #13b982;">&#9986;</span>' : ''}</spam>
+        <strong>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}${shift.is_split ? ' <span style="font-size:11px;color:#13b982;">✂</span>' : ''}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
         ${shiftType}<br>
         ${clientHtml}
     `;
@@ -1769,6 +1823,25 @@ calendar.appendChild(dayCell);
                 );
 
                 userShifts.forEach(shift => {
+                    const userDetailsArr = Array.isArray(shift.user_details) ? shift.user_details : Object.values(shift.user_details || {});
+                    const userEntry = userDetailsArr.find(d => String(d.user_id) === String(userId));
+                    const staffStart = (userEntry && userEntry.user_start_time) ? userEntry.user_start_time : shift.start_time;
+                    const staffEnd = (userEntry && userEntry.user_end_time) ? userEntry.user_end_time : shift.end_time;
+                    const timeRange = staffStart && staffEnd
+                        ? `${formatTime(staffStart)} - ${formatTime(staffEnd)}`
+                        : 'No Time';
+                    const splitBadge = shift.is_split ? ' <span style="font-size:11px;color:#13b982;">✂</span>' : '';
+                    const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
+                    let clientHtml = '';
+                    if (shift.is_advanced_shift) {
+                        let clientIds = Array.isArray(shift.clientIds) ? shift.clientIds : [shift.clientIds];
+                        const clientNamesList = clientIds.map(id => clientNames[String(id)] || 'Unknown Client');
+                        clientHtml = `<small>${clientNamesList.join(', ')}</small>`;
+                    } else {
+                        const clientName = clientNames[String(shift.client_id)] || '';
+                        clientHtml = `<small>${clientName}</small>`;
+                    }
+
                     // Non-overnight: render as before
                     if (!isOvernightShift(shift)) {
                         const div = document.createElement('div');
@@ -1776,28 +1849,13 @@ calendar.appendChild(dayCell);
                         if (shift.is_vacant) cls = 'task task-vacant';
                         else if (shift.add_to_job_board) cls = 'task task-jobboard';
                         else if (shift.is_advanced_shift) cls = 'task task-advanced';
+                        if (isSleepoverShift(shift)) cls += ' task-sleepover';
                         div.className = cls;
 
-                        const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
-                        const timeRange = shift.start_time && shift.end_time
-                            ? `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`
-                            : 'No Time';
-
-                        let clientHtml = '';
-                        if (shift.is_advanced_shift) {
-                            let clientIds = Array.isArray(shift.clientIds) ? shift.clientIds : [shift.clientIds];
-                            const clientNamesList = clientIds.map(id => clientNames[String(id)] || 'Unknown Client');
-                            clientHtml = `<small>${clientNamesList.join(', ')}</small>`;
-                        } else {
-                            const clientName = clientNames[String(shift.client_id)] || '';
-                            clientHtml = `<small>${clientName}</small>`;
-                        }
-
                         div.innerHTML = `
-                            <strong>${timeRange}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
+                            <strong>${timeRange}${splitBadge}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
                             ${shiftType}<br>
                             ${clientHtml}
-                            ${shift.is_split ? '<span style="float:right; color: #13b982; font-size: 14px;">&#9986;</span>' : ''}
                         `;
 
                         div.onclick = e => { e.stopPropagation(); openShiftSlider(shift.id, dateKey); };
@@ -1811,26 +1869,14 @@ calendar.appendChild(dayCell);
                     if (shift.is_vacant) cls1 = 'task task-vacant';
                     else if (shift.add_to_job_board) cls1 = 'task task-jobboard';
                     else if (shift.is_advanced_shift) cls1 = 'task task-advanced';
+                    if (isSleepoverShift(shift)) cls1 += ' task-sleepover';
                     part1.className = cls1 + ' overnight-start';
-
-                    const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
-
-                    let clientHtml = '';
-                    if (shift.is_advanced_shift) {
-                        let clientIds = Array.isArray(shift.clientIds) ? shift.clientIds : [shift.clientIds];
-                        const clientNamesList = clientIds.map(id => clientNames[String(id)] || 'Unknown Client');
-                        clientHtml = `<small>${clientNamesList.join(', ')}</small>`;
-                    } else {
-                        const clientName = clientNames[String(shift.client_id)] || '';
-                        clientHtml = `<small>${clientName}</small>`;
-                    }
 
                     part1.innerHTML = `
                         <strong>NEXT DAY</strong><br>
-                        <strong>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)} ${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}<span style="margin-left:35px">${shift.is_split ? '&#9986' : ''}</span></strong><br>
+                        <strong>${timeRange}${splitBadge}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
                         ${shiftType}<br>
                         ${clientHtml}
-                        ${shift.is_split ? '<span style="float:right; color: #666; font-size: 1px;">&#9986;</span>' : ''}
                     `;
                     part1.onclick = e => { e.stopPropagation(); openShiftSlider(shift.id, dateKey); };
                     dayCell.appendChild(part1);
@@ -1925,7 +1971,7 @@ function renderClientCalendar(filteredShifts = shifts) {
             const { startMinutes, durationMinutes, totalMinutes } = calculateShiftPosition(shift, startDate);
 
             const div = document.createElement('div');
-            div.className = 'task daily task-vacant';
+            div.className = 'task daily task-vacant' + (isSleepoverShift(shift) ? ' task-sleepover' : '');
             div.style.left = `${(startMinutes / totalMinutes) * 100}%`;
             div.style.width = `${Math.min((durationMinutes / totalMinutes) * 100, 100)}%`;
 
@@ -1991,16 +2037,61 @@ function renderClientCalendar(filteredShifts = shifts) {
             timelineCell.appendChild(wrapper);
 
             const clientShifts = filteredShifts.filter(
-                s => ((String(s.client_id) === String(clientId)) || (s.is_advanced_shift && s.clientIds && s.clientIds.includes(String(clientId)))) && isShiftInDateRange(s, dateKey)
+                s => ((String(s.client_id) === String(clientId)) || (s.is_advanced_shift && s.clientIds && s.clientIds.some(id => String(id) === String(clientId)))) && isShiftInDateRange(s, dateKey)
             );
 
-            clientShifts.forEach(shift => {
+            // Deduplicate advanced shifts by ID, collecting all staff names per shift
+            const _dailySeenIds = new Set();
+            const _dailyUniqueShifts = [];
+            clientShifts.forEach(s => {
+                if (!s.is_advanced_shift) {
+                    _dailyUniqueShifts.push(s);
+                } else if (!_dailySeenIds.has(s.id)) {
+                    _dailySeenIds.add(s.id);
+                    const allStaff = [...new Set(clientShifts.filter(r => r.id === s.id).map(r => users[String(r.user_id)]).filter(Boolean))].join(', ');
+                    _dailyUniqueShifts.push({ ...s, _allStaffNames: allStaff });
+                }
+            });
+
+            _dailyUniqueShifts.forEach(shift => {
+                // Advanced shift: render one block per per-client time entry if available
+                const detailsArr = Array.isArray(shift.client_details) ? shift.client_details : Object.values(shift.client_details || {});
+                if (shift.is_advanced_shift && detailsArr.length > 0) {
+                    const clientEntries = detailsArr.filter(d => String(d.client_id) === String(clientId));
+                    if (clientEntries.length > 0) {
+                        const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
+                        const staffNames = shift._allStaffNames || users[String(shift.user_id)] || '';
+                        clientEntries.forEach(entry => {
+                            const fakeShift = { ...shift, start_time: entry.client_start_time, end_time: entry.client_end_time };
+                            const { startMinutes, durationMinutes, totalMinutes } = calculateShiftPosition(fakeShift, startDate);
+                            let cls = 'task daily task-advanced';
+                            if (isSleepoverShift(fakeShift)) cls += ' task-sleepover';
+                            const div = document.createElement('div');
+                            div.className = cls;
+                            div.style.left = `${(startMinutes / totalMinutes) * 100}%`;
+                            div.style.width = `${Math.min((durationMinutes / totalMinutes) * 100, 100)}%`;
+                            const timeRange = entry.client_start_time && entry.client_end_time
+                                ? `${formatTime(entry.client_start_time)} - ${formatTime(entry.client_end_time)}`
+                                : 'No Time';
+                            div.innerHTML = `
+                                <strong>${timeRange}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong>
+                                <div>${shiftType}</div>
+                                <div class="small-text">${staffNames}</div>
+                            `;
+                            div.onclick = e => { e.stopPropagation(); openShiftSlider(shift.id, dateKey); };
+                            wrapper.appendChild(div);
+                        });
+                        return;
+                    }
+                }
+
                 const { startMinutes, durationMinutes, totalMinutes } = calculateShiftPosition(shift, startDate);
 
                 let cls = 'task daily default';
                 if (shift.is_vacant) cls = 'task daily task-vacant';
                 else if (shift.is_advanced_shift) cls = 'task daily task-advanced';
                 else if (shift.add_to_job_board) cls = 'task daily task-jobboard';
+                if (isSleepoverShift(shift)) cls += ' task-sleepover';
 
                 const div = document.createElement('div');
                 div.className = cls;
@@ -2011,7 +2102,7 @@ function renderClientCalendar(filteredShifts = shifts) {
                     ? `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`
                     : 'No Time';
                 const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
-                const staffName = users[String(shift.user_id)] || '';
+                const staffName = shift._allStaffNames || users[String(shift.user_id)] || '';
 
                 div.innerHTML = `
                     <strong>${timeRange}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong>
@@ -2076,7 +2167,7 @@ function renderClientCalendar(filteredShifts = shifts) {
             vacantShifts.forEach(shift => {
                 if (!isOvernightShift(shift)) {
                     const div = document.createElement('div');
-                    div.className = 'task task-vacant';
+                    div.className = 'task task-vacant' + (isSleepoverShift(shift) ? ' task-sleepover' : '');
 
                     const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
                     const timeRange = shift.start_time && shift.end_time
@@ -2100,7 +2191,7 @@ function renderClientCalendar(filteredShifts = shifts) {
                 } else {
                     // Overnight start part
                     const part1 = document.createElement('div');
-                    part1.className = 'task task-vacant overnight-start';
+                    part1.className = 'task task-vacant overnight-start' + (isSleepoverShift(shift) ? ' task-sleepover' : '');
                     const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
 
                     let staffHtml = '';
@@ -2170,19 +2261,61 @@ function renderClientCalendar(filteredShifts = shifts) {
                 cell.setAttribute('data-row', `client__${clientId}`);
 
                 const clientShifts = filteredShifts.filter(
-                    s => ((String(s.client_id) === String(clientId)) || (s.is_advanced_shift && s.clientIds && s.clientIds.includes(String(clientId)))) && isShiftInDateRange(s, dateKey)
+                    s => ((String(s.client_id) === String(clientId)) || (s.is_advanced_shift && s.clientIds && s.clientIds.some(id => String(id) === String(clientId)))) && isShiftInDateRange(s, dateKey)
                 );
 
-                clientShifts.forEach(shift => {
+                // Deduplicate advanced shifts by ID, collecting all staff names per shift
+                const _weekSeenIds = new Set();
+                const _weekUniqueShifts = [];
+                clientShifts.forEach(s => {
+                    if (!s.is_advanced_shift) {
+                        _weekUniqueShifts.push(s);
+                    } else if (!_weekSeenIds.has(s.id)) {
+                        _weekSeenIds.add(s.id);
+                        const allStaff = [...new Set(clientShifts.filter(r => r.id === s.id).map(r => users[String(r.user_id)]).filter(Boolean))].join(', ');
+                        _weekUniqueShifts.push({ ...s, _allStaffNames: allStaff });
+                    }
+                });
+
+                _weekUniqueShifts.forEach(shift => {
+                    // Advanced shift: render one block per per-client time entry if available
+                    const detailsArr = Array.isArray(shift.client_details) ? shift.client_details : Object.values(shift.client_details || {});
+                    if (shift.is_advanced_shift && detailsArr.length > 0) {
+                        const clientEntries = detailsArr.filter(d => String(d.client_id) === String(clientId));
+                        if (clientEntries.length > 0) {
+                            const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
+                            const staffNames = shift._allStaffNames || users[String(shift.user_id)] || '';
+                            clientEntries.forEach(entry => {
+                                const div = document.createElement('div');
+                                const fakeShift = { ...shift, start_time: entry.client_start_time, end_time: entry.client_end_time };
+                                let cls = 'task task-advanced';
+                                if (isSleepoverShift(fakeShift)) cls += ' task-sleepover';
+                                div.className = cls;
+                                const timeRange = entry.client_start_time && entry.client_end_time
+                                    ? `${formatTime(entry.client_start_time)} - ${formatTime(entry.client_end_time)}`
+                                    : 'No Time';
+                                div.innerHTML = `
+                                    <strong>${timeRange} ${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
+                                    ${shiftType}<br>
+                                    <small>${staffNames}</small>
+                                `;
+                                div.onclick = e => { e.stopPropagation(); openShiftSlider(shift.id, dateKey); };
+                                cell.appendChild(div);
+                            });
+                            return;
+                        }
+                    }
+
                     if (!isOvernightShift(shift)) {
                         const div = document.createElement('div');
                         let cls = 'task default';
                         if (shift.is_vacant) cls = 'task task-vacant';
                         else if (shift.is_advanced_shift) cls = 'task task-advanced';
                         else if (shift.add_to_job_board) cls = 'task task-jobboard';
+                        if (isSleepoverShift(shift)) cls += ' task-sleepover';
                         div.className = cls;
 
-                        const staffName = users[String(shift.user_id)] || '';
+                        const staffName = shift._allStaffNames || users[String(shift.user_id)] || '';
                         const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
                         const timeRange = shift.start_time && shift.end_time
                             ? `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`
@@ -2202,14 +2335,15 @@ function renderClientCalendar(filteredShifts = shifts) {
                         if (shift.is_vacant) cls1 = 'task task-vacant';
                         else if (shift.is_advanced_shift) cls1 = 'task task-advanced';
                         else if (shift.add_to_job_board) cls1 = 'task task-jobboard';
+                        if (isSleepoverShift(shift)) cls1 += ' task-sleepover';
                         part1.className = cls1 + ' overnight-start';
 
-                        const staffName = users[String(shift.user_id)] || '';
+                        const staffName = shift._allStaffNames || users[String(shift.user_id)] || '';
                         const shiftType = shiftTypeNames[String(shift.shift_type_id)] || 'Shift';
 
                         part1.innerHTML = `
                             <strong>NEXT DAY</strong><br>
-                            <strong>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}  ${shift.is_approved ? '<span style="color: #10b981;" title="Approved">&#10004;</span>' : ''}${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
+                            <strong>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}  ${getStatusIcon(shift.status)}${getSeriesIcon(shift)}${getSleepoverIcon(shift)}</strong><br>
                             ${shiftType}<br>
                             <small>${staffName}</small>
                         `;
@@ -2217,7 +2351,7 @@ function renderClientCalendar(filteredShifts = shifts) {
                         cell.appendChild(part1);
 
                         // Continuation tomorrow
-                        
+
                     }
                 });
 
@@ -2271,16 +2405,7 @@ function isPublicHoliday(dateKey) {
 }
 
 function getPublicHolidayColor(dateKey) {
-    const colors = [
-        'rgba(255, 235, 238, 0.8)',
-        'rgba(237, 242, 255, 0.8)',
-        'rgba(232, 245, 233, 0.8)',
-        'rgba(255, 243, 204, 0.8)',
-        'rgba(243, 237, 245, 0.8)',
-        'rgba(255, 237, 225, 0.8)',
-    ];
-    const hash = dateKey.split('-').reduce((a, b) => a + parseInt(b || '0'), 0);
-    return colors[hash % colors.length];
+    return '#fffd8db1';
 }
 
 function calculateShiftPosition(shift, refDate) {

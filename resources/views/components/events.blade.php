@@ -104,6 +104,9 @@
         right: 10px;
         cursor: pointer;
         font-size: 16px;
+        background: none;
+        border: none;
+        padding: 2px;
     }
 
     .attachment-icon::after {
@@ -111,18 +114,8 @@
         color: #6b7280;
     }
 
-    .attachment-icon:hover::before {
-        content: "This event has an attachment";
-        position: absolute;
-        top: -25px;
-        right: 0;
-        background: #333;
-        color: #fff;
-        padding: 5px 10px;
-        border-radius: 4px;
-        font-size: 12px;
-        white-space: nowrap;
-        z-index: 1;
+    .attachment-icon:hover::after {
+        color: #3b82f6;
     }
 
     .dots {
@@ -157,30 +150,26 @@
                 </span>
 
                 <span x-show="expanded">
-                    {{ $event->body }} <br><br>
-                    @if(!empty($event->note_attachments))
-                      @foreach($event->note_attachments as $attachment)
-                          <div class="attachment">
-                              <img style="
-                                  max-width: 100%;
-                                  border: 1px #dfdfdf groove;
-                                  border-radius: 10px;
-                                  margin-top: 10px;
-                                  margin-bottom: 10px;
-                                  height: auto;" src="{{ Storage::url($attachment['file_path']) }}" alt="Attachment">
-                          </div>
-                      @endforeach
-                  @endif
+                    {{ $event->body }}
                     <span class="view-less" @click="expanded = false">View less</span>
                 </span>
             </div>
             @if(!empty($event->note_attachments))
-                <span class="attachment-icon"></span>
+                @php
+                    $attachmentJson = collect($event->note_attachments)->map(fn($a) => [
+                        'url'  => Storage::url($a['file_path']),
+                        'name' => basename($a['file_path']),
+                    ])->toJson();
+                @endphp
+                <span class="attachment-icon" title="View attachments"
+                      onclick="openAttachmentPopup(this)"
+                      data-attachments="{{ $attachmentJson }}">
+                </span>
             @endif
         </div>
     </div>
     @endforeach
-   <div 
+   <div
         x-show="open"
         class="fixed inset-0 z-50 flex"
         x-transition
@@ -230,25 +219,21 @@
                 </span>
 
                 <span x-show="expanded">
-                    {{ $event->body }} <br><br>
-                    @if(!empty($event->note_attachments))
-                      @foreach($event->note_attachments as $attachment)
-                          <div class="attachment">
-                              <img style="
-                                  max-width: 100%;
-                                  border: 1px #dfdfdf groove;
-                                  border-radius: 10px;
-                                  margin-top: 10px;
-                                  margin-bottom: 10px;
-                                  height: auto;" src="{{ Storage::url($attachment['file_path']) }}" alt="Attachment">
-                          </div>
-                      @endforeach
-                  @endif
+                    {{ $event->body }}
                     <span class="view-less" @click="expanded = false">View less</span>
                 </span>
             </div>
             @if(!empty($event->note_attachments))
-                <span class="attachment-icon"></span>
+                @php
+                    $attachmentJson = collect($event->note_attachments)->map(fn($a) => [
+                        'url'  => Storage::url($a['file_path']),
+                        'name' => basename($a['file_path']),
+                    ])->toJson();
+                @endphp
+                <span class="attachment-icon" title="View attachments"
+                      onclick="openAttachmentPopup(this)"
+                      data-attachments="{{ $attachmentJson }}">
+                </span>
             @endif
         </div>
     </div>
@@ -259,6 +244,51 @@
 </div>
 
 <script>
+function openAttachmentPopup(el) {
+    const attachments = JSON.parse(el.dataset.attachments || '[]');
+    if (!attachments.length) return;
+
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'bmp', 'webp'];
+    const fileIcons = { pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊', csv: '📊', txt: '📋', zip: '🗜️', eml: '📧' };
+
+    let html = '<div style="display:flex;flex-direction:column;gap:12px;max-height:70vh;overflow-y:auto;padding:4px;">';
+    attachments.forEach(att => {
+        const ext = att.name.split('.').pop().toLowerCase();
+        const isImage = imageExts.includes(ext);
+        const icon = fileIcons[ext] || '📎';
+
+        if (isImage) {
+            html += `
+                <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                    <img src="${att.url}" style="max-width:100%;border-radius:6px;display:block;margin-bottom:8px;" alt="${att.name}">
+                    <a href="${att.url}" download="${att.name}"
+                       style="display:inline-block;background:#3b82f6;color:#fff;padding:6px 14px;border-radius:4px;font-size:13px;text-decoration:none;">
+                       ⬇ Download
+                    </a>
+                </div>`;
+        } else {
+            html += `
+                <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:28px;">${icon}</span>
+                    <div style="flex:1;font-size:14px;font-weight:500;word-break:break-all;">${att.name}</div>
+                    <a href="${att.url}" download="${att.name}"
+                       style="flex-shrink:0;background:#3b82f6;color:#fff;padding:6px 14px;border-radius:4px;font-size:13px;text-decoration:none;">
+                       ⬇ Download
+                    </a>
+                </div>`;
+        }
+    });
+    html += '</div>';
+
+    Swal.fire({
+        title: 'Attachments',
+        html: html,
+        width: '600px',
+        showConfirmButton: false,
+        showCloseButton: true,
+    });
+}
+
 document.addEventListener("livewire:load", () => {
     attachViewMoreListeners();
 

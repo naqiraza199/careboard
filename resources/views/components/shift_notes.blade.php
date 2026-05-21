@@ -2,6 +2,43 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
         window.noteTypes = @json($noteTypes);
+
+        function openAttachmentPopup(el) {
+            const attachments = JSON.parse(el.dataset.attachments || '[]');
+            if (!attachments.length) return;
+
+            const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'tif', 'tiff', 'bmp', 'webp'];
+            const fileIcons = { pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊', csv: '📊', txt: '📋', zip: '🗜️', eml: '📧' };
+
+            let html = '<div style="display:flex;flex-direction:column;gap:12px;max-height:70vh;overflow-y:auto;padding:4px;">';
+            attachments.forEach(att => {
+                const ext = att.name.split('.').pop().toLowerCase();
+                const isImage = imageExts.includes(ext);
+                const icon = fileIcons[ext] || '📎';
+
+                if (isImage) {
+                    html += `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                        <img src="${att.url}" style="max-width:100%;border-radius:6px;display:block;margin-bottom:8px;" alt="${att.name}">
+                        <a href="${att.url}" download="${att.name}" style="display:inline-block;background:#3b82f6;color:#fff;padding:6px 14px;border-radius:4px;font-size:13px;text-decoration:none;">⬇ Download</a>
+                    </div>`;
+                } else {
+                    html += `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;display:flex;align-items:center;gap:12px;">
+                        <span style="font-size:28px;">${icon}</span>
+                        <div style="flex:1;font-size:14px;font-weight:500;word-break:break-all;">${att.name}</div>
+                        <a href="${att.url}" download="${att.name}" style="flex-shrink:0;background:#3b82f6;color:#fff;padding:6px 14px;border-radius:4px;font-size:13px;text-decoration:none;">⬇ Download</a>
+                    </div>`;
+                }
+            });
+            html += '</div>';
+
+            Swal.fire({
+                title: 'Attachments',
+                html: html,
+                width: '600px',
+                showConfirmButton: false,
+                showCloseButton: true,
+            });
+        }
     document.addEventListener('open-add-notes-modal', () => {
         Swal.fire({
             title: '📝 Add Shift Note',
@@ -54,6 +91,8 @@
             `,
             showCancelButton: true,
             confirmButtonText: 'Add Note',
+            showLoaderOnConfirm: true,
+            allowOutsideClick: () => !Swal.isLoading(),
             preConfirm: () => {
             const noteType = document.getElementById('noteType').value;
             const noteBody = document.getElementById('noteBody').value.trim();
@@ -61,9 +100,34 @@
             const mileage = noteType === 'Mileage' ? parseFloat(document.getElementById('mileage').value) || null : null;
             const attachments = document.getElementById('attachments').files;
 
-            if (!noteBody) return Swal.showValidationMessage('Please enter a note body');
+            if (!noteBody) {
+                Swal.showValidationMessage('Please enter a note body');
+                return false;
+            }
 
-            return { noteType, noteBody, keepPrivate, mileage, attachments };
+            return new Promise((resolve) => {
+                const noteAddedHandler = () => {
+                    window.removeEventListener('note-added', noteAddedHandler);
+                    resolve(true);
+                };
+                window.addEventListener('note-added', noteAddedHandler);
+
+                const dispatchSave = () => {
+                    Livewire.dispatch('saveNotes', { noteType, noteBody, keepPrivate, mileage });
+                };
+
+                if (attachments.length > 0) {
+                    @this.uploadMultiple('attachments', attachments,
+                        dispatchSave,
+                        () => {
+                            window.removeEventListener('note-added', noteAddedHandler);
+                            Swal.showValidationMessage('File upload failed. Please try again.');
+                        }
+                    );
+                } else {
+                    dispatchSave();
+                }
+            });
         },
         didOpen: () => {
             const noteTypeSelect = document.getElementById('noteType');
@@ -128,26 +192,8 @@
                 });
             });
         }
-        }).then(result => {
-        if (result.isConfirmed && result.value) {
-            Swal.showLoading();
-
-            const { noteType, noteBody, keepPrivate, mileage, attachments } = result.value;
-
-            if (attachments.length > 0) {
-                @this.uploadMultiple('attachments', attachments, 
-                    () => {
-                        Livewire.dispatch('saveNotes', { noteType, noteBody, keepPrivate, mileage });
-                    },
-                    () => {
-                        Swal.fire({ icon: 'error', title: 'File upload failed!' });
-                    }
-                );
-            } else {
-                // No attachments, just save
-                Livewire.dispatch('saveNotes', { noteType, noteBody, keepPrivate, mileage });
-            }
-        }
+        }).then(() => {
+            // Note saved and redirect handled by Livewire
         });
         });
 

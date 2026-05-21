@@ -277,11 +277,11 @@
                     </div>
                     <div class="form-group">
                         <label class="block text-sm font-medium text-gray-700">Issued at</label>
-                        <input type="date" wire:model="issue_date" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm" value="{{ now()->format('Y-m-d') }}" id="issued-at-1">
+                        <input type="text" wire:model="issue_date" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm" id="issued-at-1" readonly>
                     </div>
                     <div class="form-group">
                         <label class="block text-sm font-medium text-gray-700">Payment Due</label>
-                      <input type="date" wire:model="payment_due" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm" value="{{ now()->addDays(14)->format('Y-m-d') }}" id="payment-due-1">
+                      <input type="text" wire:model="payment_due" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm" id="payment-due-1" readonly>
                     </div>
                     <div class="form-group">
                         <label class="block text-sm font-medium text-gray-700">PO</label>
@@ -393,7 +393,7 @@
                                 <td class="px-6 py-4" style="font-size:13px;">Hours</td>
                                 <td class="px-6 py-4" style="font-size:13px;">{{ $report->matched_price_book_detail->ref_hour ?? '-' }}</td>
                                 <td class="px-6 py-4" style="font-size:13px;">{{ $report->hours !== null ? number_format($report->hours, 1) : '-' }}</td>
-                                <td class="px-6 py-4" style="font-size:13px;">{{ $report->rate ?? '-' }}</td>
+                                <td class="px-6 py-4" style="font-size:13px;">$ {{ $report->rate ?? '-' }}</td>
                                 <td class="px-6 py-4" style="font-size:13px;">
                                     <div class="tooltip-container">
                                         <input type="checkbox" class="tax-checkbox"

@@ -77,7 +77,7 @@
                                 <th class="px-4 py-2 text-left">Time</th>
                                 @endif
                                 <th class="px-4 py-2 text-left">{{ $book->fixed_price ? 'Price' : 'Per Hour' }}</th>
-                                <th class="px-4 py-2 text-left">Reference Number (Hour)</th>
+                                <th class="px-4 py-2 text-left">Reference Number ({{ $book->fixed_price ? 'Fixed' : 'Hour' }})</th>
                                 <th class="px-4 py-2 text-left">Per Km</th>
                                 <th class="px-4 py-2 text-left">Reference Number</th>
                                 <th class="px-4 py-2 text-left">Effective Date</th>
@@ -187,7 +187,7 @@
                                         <!-- Reference Number (Hour) -->
                                 <div>
                                     <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        Reference Number (Hour)
+                                        Reference Number ({{ $this->isFixedPriceBook() ? 'Fixed' : 'Hour' }})
                                     </label>
                                     <input
                                         type="text"
@@ -202,7 +202,7 @@
 
                                 <!-- Per Hour - Create (readonly) -->
                                 <div>
-                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Per Hour</label>
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $this->isFixedPriceBook() ? 'Fixed' : 'Per Hour' }}</label>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -304,7 +304,7 @@
                             <!-- Reference Number (Hour) - Edit -->
                             <div>
                                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Reference Number (Hour)
+                                    Reference Number ({{ $this->isEditingFixedPriceBook() ? 'Fixed' : 'Hour' }})
                                 </label>
                                 <input
                                     type="text"
@@ -319,7 +319,7 @@
 
                             <!-- Per Hour - Edit (readonly) -->
                             <div>
-                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Per Hour</label>
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $this->isEditingFixedPriceBook() ? 'Fixed' : 'Per Hour' }}</label>
                                 <input
                                     type="number"
                                     step="0.01"

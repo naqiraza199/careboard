@@ -128,23 +128,28 @@ class InvoiceView extends Page
         $this->billingReports = \App\Models\BillingReport::whereIn('id', $this->billing_ids)
             ->get()
             ->map(function ($report) {
-                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'x') !== false) {
-                    [$hours, $rate] = array_map('trim', explode('x', $report->hours_x_rate, 2));
-                    
+                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, ' x ') !== false) {
+                    [$hours, $rate] = array_map('trim', explode(' x ', $report->hours_x_rate, 2));
+
                     $hours = (float) $hours;
                     $rateValue = (float) str_replace(['$', ','], '', $rate);
 
-                    $report->hours = $hours;    
-                    $report->rate = $rate; 
-                    $report->hours_total = $hours * $rateValue;    
+                    $report->hours = $hours;
+                    $report->rate = $rate;
+                    $report->hours_total = $hours * $rateValue;
+                } elseif (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'Fixed:') !== false) {
+                    $fixedAmount = trim(str_replace('Fixed:', '', $report->hours_x_rate));
+                    $report->hours = null;
+                    $report->rate = $fixedAmount;
+                    $report->hours_total = (float) str_replace(['$', ','], '', $fixedAmount);
                 } else {
                     $report->hours = null;
                     $report->rate = null;
                     $report->hours_total = null;
                 }
 
-                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, 'x') !== false) {
-                    [$distance, $rate] = array_map('trim', explode('x', $report->distance_x_rate, 2));
+                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, ' x ') !== false) {
+                    [$distance, $rate] = array_map('trim', explode(' x ', $report->distance_x_rate, 2));
 
                     $distance = (float) $distance;
                     $rateValue = (float) str_replace(['$', ','], '', $rate);

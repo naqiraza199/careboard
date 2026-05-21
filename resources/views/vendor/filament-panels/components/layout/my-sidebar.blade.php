@@ -190,26 +190,83 @@
    }
    /* Responsive media query code for small screens */
    @media (max-width: 768px) {
-   .sidebar-menu-button {
-   position: fixed;
-   left: 20px;
-   top: 20px;
-   height: 40px;
-   width: 42px;
-   display: flex;
-   color: #F1F4FF;
-   background: #151A2D;
-   }
-   .sidebar.collapsed {
-   width: 270px;
-   left: -270px;
-   }
-   .sidebar.collapsed .sidebar-header .sidebar-toggler {
-   transform: none;
-   }
-   .sidebar.collapsed .sidebar-nav .primary-nav {
-   transform: translateY(15px);
-   }
+      .sidebar-menu-button {
+         position: fixed;
+         left: 14px;
+         top: 10px;
+         height: 38px;
+         width: 40px;
+         display: flex;
+         color: #F1F4FF;
+         background: #151A2D;
+         border-radius: 8px;
+         border: none;
+         cursor: pointer;
+         align-items: center;
+         justify-content: center;
+         z-index: 1001;
+         box-shadow: 0 2px 8px rgba(0,0,0,0.28);
+      }
+      /* Sidebar sits above everything on mobile */
+      .sidebar {
+         z-index: 1000;
+      }
+      /* Hidden: slides off-screen to the left */
+      .sidebar.collapsed {
+         width: 270px;
+         left: -270px;
+         box-shadow: none;
+      }
+      /* Open: full-width slide-in, overlays content */
+      .sidebar:not(.collapsed) {
+         width: 270px;
+         left: 0;
+         box-shadow: 6px 0 28px rgba(0,0,0,0.38);
+      }
+      /* No icon-only mode on mobile — reset desktop transforms */
+      .sidebar.collapsed .sidebar-header .sidebar-toggler {
+         transform: none;
+      }
+      .sidebar.collapsed .sidebar-nav .primary-nav {
+         transform: translateY(15px);
+      }
+      /* Hide the in-sidebar chevron toggler; menu button does the job */
+      .sidebar-header .sidebar-toggler {
+         display: none;
+      }
+      /* Always show labels when sidebar is open on mobile */
+      .sidebar:not(.collapsed) .nav-link .nav-label,
+      .sidebar:not(.collapsed) .nav-link .dropdown-icon {
+         opacity: 1 !important;
+         pointer-events: auto !important;
+      }
+      /* Main content fills the full viewport — no sidebar push */
+      .main-content-sidebar {
+         left: 0 !important;
+         padding-right: 0 !important;
+         width: 100% !important;
+      }
+      .extra-content {
+         left: 0 !important;
+         padding-right: 0 !important;
+         width: 100% !important;
+      }
+      body.sidebar-collapsed .main-content-sidebar,
+      body.sidebar-collapsed .extra-content {
+         left: 0 !important;
+         padding-right: 0 !important;
+      }
+      /* Dim backdrop shown while sidebar is open */
+      .sidebar-backdrop {
+         display: none;
+         position: fixed;
+         inset: 0;
+         z-index: 999;
+         background: rgba(0, 0, 0, 0.52);
+      }
+      .sidebar-backdrop.active {
+         display: block;
+      }
    }
    /* Default positions */
    .main-content-sidebar {
@@ -267,9 +324,11 @@
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
 <!-- Mobile Sidebar Menu Button -->
-<button class="sidebar-menu-button">
+<button class="sidebar-menu-button" id="sidebar-menu-btn">
 <span class="material-symbols-rounded">menu</span>
 </button>
+<!-- Mobile backdrop -->
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 <aside class="sidebar">
    <!-- Sidebar Header -->
    <header class="sidebar-header">
@@ -545,14 +604,14 @@
                   </a>
                </li>
                @endif
-               {{-- @if ($user && $user->hasPermissionTo('manage-void-invoices'))
+             @if ($user && $user->hasPermissionTo('manage-void-invoices'))
                <li class="nav-item">
                   <a href="{{ url('/admin/invoice-void') }}" class="nav-link dropdown-toggle">
                   <span class="material-symbols-rounded">keyboard_arrow_right</span>
                   <span class="nav-label">List Void</span>
                   </a>
                </li>
-               @endif --}}
+               @endif 
                @if ($user && $user->hasPermissionTo('generate-invoices'))
                <li class="nav-item">
                   <a href="{{ url('/admin/invoice-generate') }}" class="nav-link dropdown-toggle">
@@ -897,6 +956,23 @@
      // --------------------
      // Sidebar toggler logic
      // --------------------
+     const backdrop = document.getElementById("sidebar-backdrop");
+
+     const syncBackdrop = (sidebar) => {
+       if (window.innerWidth > 768 || !backdrop) return;
+       backdrop.classList.toggle("active", !sidebar.classList.contains("collapsed"));
+     };
+
+     if (backdrop) {
+       backdrop.addEventListener("click", () => {
+         const sidebar = document.querySelector(".sidebar");
+         if (!sidebar) return;
+         sidebar.classList.add("collapsed");
+         document.body.classList.add("sidebar-collapsed");
+         backdrop.classList.remove("active");
+       });
+     }
+
      document.querySelectorAll(".sidebar-toggler, .sidebar-menu-button").forEach((button) => {
        button.addEventListener("click", () => {
          closeAllDropdowns();
@@ -904,6 +980,7 @@
          if (!sidebar) return;
          sidebar.classList.toggle("collapsed");
          document.body.classList.toggle("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+         syncBackdrop(sidebar);
        });
      });
    
@@ -916,7 +993,10 @@
      }
    
       window.addEventListener("resize", () => {
-        // No need to adjust heights with max-height approach
+        // Close backdrop when resizing to desktop
+        if (window.innerWidth > 768 && backdrop) {
+          backdrop.classList.remove("active");
+        }
       });
    
      // --------------------

@@ -246,18 +246,23 @@ public function confirm()
         // ✅ Normal shift: existing logic
         $billingRecord = BillingReport::where('shift_id', $this->shift->id)->first();
 
-        [$hours, $rateStr] = explode(' x $', $billingRecord->hours_x_rate);
-        $hours = (float) $hours;
-        $rate  = (float) str_replace(',', '', $rateStr); // clean number
+        $hoursXRate = $billingRecord->hours_x_rate ?? '';
+        if (str_contains($hoursXRate, ' x $')) {
+            [$hoursStr, $rateStr] = explode(' x $', $hoursXRate);
+            $hours    = (float) $hoursStr;
+            $rate     = (float) str_replace(',', '', $rateStr);
+            $baseCost = $hours * $rate;
+        } else {
+            // Fixed price format: "Fixed: $100.00"
+            $baseCost = (float) str_replace([',', 'Fixed: $'], ['', ''], $hoursXRate);
+        }
 
-        $perKmPrice = $per_km_price ?? 1; // define how you store per_km_price
-        $mileage    = $approvedShift->mileage;
-        $distanceCost = $mileage * $perKmPrice;
+        $perKmPrice    = $billingRecord->per_km_price ?? 1;
+        $mileage       = $approvedShift->mileage;
+        $distanceCost  = $mileage * $perKmPrice;
         $distanceXRate = $mileage . ' x $' . number_format($perKmPrice, 2);
-
         $additionalCost = $approvedShift->expense;
-
-        $totalCost = ($hours * $rate) + $additionalCost + $distanceCost;
+        $totalCost = $baseCost + $additionalCost + $distanceCost;
 
         $billingRecord->update([
             'additional_cost' => $additionalCost,
@@ -271,18 +276,23 @@ public function confirm()
         $billingRecords = BillingReport::where('shift_id', $this->shift->id)->get();
 
         foreach ($billingRecords as $billingRecord) {
-            [$hours, $rateStr] = explode(' x $', $billingRecord->hours_x_rate);
-            $hours = (float) $hours;
-            $rate  = (float) str_replace(',', '', $rateStr);
+            $hoursXRate = $billingRecord->hours_x_rate ?? '';
+            if (str_contains($hoursXRate, ' x $')) {
+                [$hoursStr, $rateStr] = explode(' x $', $hoursXRate);
+                $hours    = (float) $hoursStr;
+                $rate     = (float) str_replace(',', '', $rateStr);
+                $baseCost = $hours * $rate;
+            } else {
+                // Fixed price format: "Fixed: $100.00"
+                $baseCost = (float) str_replace([',', 'Fixed: $'], ['', ''], $hoursXRate);
+            }
 
-            $perKmPrice = $per_km_price ?? 1;
-            $mileage    = $approvedShift->mileage;
-            $distanceCost = $mileage * $perKmPrice;
+            $perKmPrice    = $billingRecord->per_km_price ?? 1;
+            $mileage       = $approvedShift->mileage;
+            $distanceCost  = $mileage * $perKmPrice;
             $distanceXRate = $mileage . ' x $' . number_format($perKmPrice, 2);
-
             $additionalCost = $approvedShift->expense;
-
-            $totalCost = ($hours * $rate) + $additionalCost + $distanceCost;
+            $totalCost = $baseCost + $additionalCost + $distanceCost;
 
             $billingRecord->update([
                 'additional_cost' => $additionalCost,
@@ -442,13 +452,6 @@ public function cancelShift($reason, $type = null, $notes = null, $notifyCarer =
 
     Notification::make()->title('Note added successfully!')->success()->send();
     $this->dispatch('note-added', message: 'Note added successfully!');
-
-if ($authUser->hasPermissionTo('all-schedulers')) {
-    $this->redirect('/admin/schedular');
-} else {
-    $this->redirect('/admin/own-staff-scheduler?user_id=' . $authUser->id);
-}
-
 }
 
 

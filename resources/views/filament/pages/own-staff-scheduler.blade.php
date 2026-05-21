@@ -756,6 +756,9 @@
         const clientNames = @json($clientNames ?? []);
         const shiftTypeNames = @json($shiftTypeNames ?? []);
         const userId = {{ $userId ?? 'null' }};
+        const publicHolidays = @json($publicHolidays ?? []);
+        function isPublicHoliday(dateKey) { return publicHolidays.includes(dateKey); }
+        function getPublicHolidayColor() { return 'rgba(255, 243, 176, 0.6)'; }
 
         function formatTime(time) {
             if (!time) return '';
@@ -798,6 +801,9 @@
                 dayCell.className = 'calendar-day';
                 dayCell.textContent = date;
                 const dateKey = `${year}-${(month + 1).toString().padStart(2, '0')}-${date.toString().padStart(2, '0')}`;
+                if (isPublicHoliday(dateKey)) {
+                    dayCell.style.background = getPublicHolidayColor();
+                }
 
                 const userShifts = shifts.filter(shift => {
                     if (userId === null || shift.user_id === null) return false;

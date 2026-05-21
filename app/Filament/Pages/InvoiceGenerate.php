@@ -282,18 +282,21 @@ $authUser = auth()->user();
         $billingReports = $billingReportsQuery->get()
             ->map(function ($report) {
                 // Parse hours_x_rate (e.g., "8 x $95.00")
-                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'x') !== false) {
-                    [$hours, $rate] = array_map('trim', explode('x', $report->hours_x_rate, 2));
+                if (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, ' x ') !== false) {
+                    [$hours, $rate] = array_map('trim', explode(' x ', $report->hours_x_rate, 2));
                     $report->hours = (float) $hours;
                     $report->rate  = $rate;
+                } elseif (!empty($report->hours_x_rate) && strpos($report->hours_x_rate, 'Fixed:') !== false) {
+                    $report->hours = null;
+                    $report->rate  = trim(str_replace('Fixed:', '', $report->hours_x_rate));
                 } else {
                     $report->hours = null;
                     $report->rate  = null;
                 }
 
                 // Parse distance_x_rate
-                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, 'x') !== false) {
-                    [$distance, $rate] = array_map('trim', explode('x', $report->distance_x_rate, 2));
+                if (!empty($report->distance_x_rate) && strpos($report->distance_x_rate, ' x ') !== false) {
+                    [$distance, $rate] = array_map('trim', explode(' x ', $report->distance_x_rate, 2));
                     $report->distance       = (float) $distance;
                     $report->distance_rate  = $rate;
                 } else {

@@ -10,10 +10,7 @@
          @if ($user && $user->hasPermissionTo('admin-dashboard-widgets'))
 
     <div class="filament-widget dashboard-widget">
-          <div style="    display: flex
-;
-    width: 100%;
-    justify-content: space-between;">
+          <div class="summary-row">
             <div class="summary-card">
             <h3 class="summary-title">New Incidents</h3>
             <p class="summary-value">0</p>
@@ -100,112 +97,186 @@
         font-family: 'Poppins', sans-serif;
         border-radius: 15px;
     }
-    .dashboard-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 25px;
-        margin-top: 50px;
+
+    /* ── Summary Row ── */
+    .summary-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        width: 100%;
     }
     .summary-card {
-        background-color: #fff;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        flex: 1 1 160px;
+        min-width: 130px;
+        background: #fff;
+        padding: 18px 14px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         text-align: center;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        background: linear-gradient(135deg, #ffffffff 0%, #ffffffff 100%);
-        width: 19%;
-        height: 120px;
-        border: 1px #c1c1c1 groove;
-
+        border: 1px solid #e5e7eb;
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .summary-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-    }
-    .summary-card.wide {
-        grid-column: span 2;
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.10);
     }
     .summary-title {
-        color: #444;
-        font-size: 14px;
+        color: #6b7280;
+        font-size: 11px;
         margin-bottom: 10px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 1px;
+        letter-spacing: 0.8px;
     }
     .summary-value {
-        color: #2c3e50;
-        font-size: 20px;
+        color: #111827;
+        font-size: 26px;
         font-weight: 700;
         margin: 0;
+        line-height: 1;
     }
-        .chart-card
-        {
-     padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        background: linear-gradient(135deg, #FFF 0%, #fff 100%);
-        width: 99% !important;
-        border: 1px #c1c1c1 groove;
-        }
+
+    /* ── Dashboard Grid ── */
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 22px;
+        margin-top: 28px;
+    }
+    .chart-card {
+        padding: 22px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+        min-width: 0;
+    }
     .chart-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.10);
     }
     .chart-card.wide {
         grid-column: span 2;
     }
     .chart-title {
-        color: #34495e;
-        font-size: 16px;
-        margin-bottom: 15px;
+        color: #1f2937;
+        font-size: 14px;
+        margin-bottom: 16px;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px;
     }
     .view-report {
-        color: #e74c3c;
+        color: #3b82f6;
         text-decoration: none;
-        margin-left: 10px;
+        font-size: 12px;
         font-weight: 500;
-        transition: color 0.3s ease;
+        transition: color 0.2s ease;
     }
     .view-report:hover {
-        color: #c0392b;
+        color: #1d4ed8;
         text-decoration: underline;
     }
     .chart-wrapper {
-        display: flex;
-        justify-content: space-between;
-        height: 300px;
+        height: 280px;
+        position: relative;
     }
-
+    .chart-wrapper-hehe {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        width: 100%;
+        box-sizing: border-box;
+    }
     .chart-half {
-        width: 48%;
-        height:100%;
+        flex: 1 1 280px;
+        min-width: 0;
+        height: 320px;
+        position: relative;
+        overflow: hidden;
+    }
+    .chart-half canvas {
+        position: absolute !important;
+        top: 0; left: 0;
+        width: 100% !important;
+        height: 100% !important;
     }
     canvas {
-        width: 100%;
-        height: 100%;
+        width: 100% !important;
         border-radius: 5px;
+    }
+    .chart-card.wide .chart-half:last-child {
+        height: auto;
+        overflow-y: auto;
+        max-height: 320px;
     }
     .variance-table {
         width: 100%;
         border-collapse: collapse;
     }
-    .variance-table td {
-        padding: 10px;
-        border-bottom: 1px solid #eee;
+    .variance-table th {
+        padding: 10px 8px;
+        border-bottom: 2px solid #e5e7eb;
         text-align: left;
-        font-size: 14px;
-        color: #7f8c8d;
+        font-size: 12px;
+        color: #374151;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .variance-table td {
+        padding: 10px 8px;
+        border-bottom: 1px solid #f3f4f6;
+        text-align: left;
+        font-size: 13px;
+        color: #6b7280;
     }
     .trend-line {
         border: 0;
         height: 3px;
-        background-color: #e74c3c;
+        background: linear-gradient(90deg, #3b82f6, #93c5fd);
         margin: 5px 0;
         border-radius: 2px;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 1024px) {
+        .dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+        .chart-card.wide {
+            grid-column: span 1;
+        }
+    }
+    @media (max-width: 640px) {
+        .summary-row {
+            gap: 10px;
+        }
+        .summary-card {
+            flex: 1 1 calc(50% - 10px);
+            min-width: 120px;
+            padding: 14px 10px;
+        }
+        .summary-value {
+            font-size: 22px;
+        }
+        .dashboard-grid {
+            gap: 14px;
+            margin-top: 18px;
+        }
+        .chart-wrapper {
+            height: 220px;
+        }
+        .chart-half {
+            height: 240px;
+        }
     }
 </style>
       

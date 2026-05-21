@@ -18,7 +18,10 @@ use App\Models\Invoice;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use App\Models\AdditionalContact;
+use App\Models\BillingReport;
+use App\Models\Event;
 use App\Models\InvoicePayment;
+use App\Models\Shift;
 use Str;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\Filter;
@@ -44,17 +47,14 @@ class InvoiceVoid extends Page implements Tables\Contracts\HasTable
 
     protected static ?int $navigationSort = 2;
 
-        //                public static function canAccess(): bool
-        // {
-        //     $user = Filament::auth()->user();
-
-        //     return $user && $user->hasPermissionTo('manage-void-invoices');
-        // }
-
-          public static function canAccess(): bool
+                       public static function canAccess(): bool
         {
-            return false; // Disable access to this page for all users
+            $user = Filament::auth()->user();
+
+            return $user && $user->hasPermissionTo('manage-void-invoices');
         }
+
+     
 
 
 public function table(Table $table): Table
@@ -164,18 +164,48 @@ public function table(Table $table): Table
                 ->tooltip('Remove from void this invoice')
                 ->color('ligi')
                 ->icon('heroicon-s-arrow-path-rounded-square')
-                ->action( function ($record) {
-                        
+                ->action(function ($record) {
+
+                    // Get billing report IDs linked to this invoice
+                    $billingReportIds = is_string($record->billing_reports_ids)
+                        ? json_decode($record->billing_reports_ids, true)
+                        : ($record->billing_reports_ids ?? []);
+
+                    // Get shift IDs from those billing reports
+                    $shiftIds = BillingReport::whereIn('id', $billingReportIds)
+                        ->pluck('shift_id')
+                        ->filter()
+                        ->unique()
+                        ->toArray();
+
+                    // Revert billing reports back to Paid
+                    BillingReport::whereIn('id', $billingReportIds)->update([
+                        'status' => 'Paid',
+                    ]);
+
+                    // Revert shifts back to Invoiced
+                    Shift::whereIn('id', $shiftIds)->update([
+                        'status' => 'Invoiced',
+                    ]);
+
+                    // Remove void flag
                     $record->update([
-                            'is_void' => 0,
-                        ]);
+                        'is_void' => 0,
+                    ]);
+
+                    // Log event
+                    Event::create([
+                        'invoice_id' => $record->id,
+                        'title'      => Auth::user()->name . ' Removed Invoice from Void',
+                        'from'       => 'Invoice',
+                        'body'       => 'Invoice restored — billing reports set back to Paid, shifts set back to Invoiced.',
+                    ]);
 
                     Notification::make()
-                        ->title('Remove Void')
-                        ->body('The invoice remove from void successfully.')
+                        ->title('Void Removed')
+                        ->body('Invoice restored. Billing reports set back to Paid and shifts set back to Invoiced.')
                         ->success()
                         ->send();
-                    
 
                 }),
         ])

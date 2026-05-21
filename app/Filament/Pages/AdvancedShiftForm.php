@@ -94,6 +94,105 @@ public function mount(): void
     $this->form->fill();
 }
 
+public function removeClientBadge(int $clientId): void
+{
+    $details = collect($this->data['client_section']['client_details'] ?? [])->values()->toArray();
+
+    $clientItems = collect($details)->where('client_id', $clientId);
+
+    $firstItem = $clientItems->first();
+    if (!$firstItem) return;
+
+    // Sort items by start time (same as delete action)
+    $startTime = Carbon::parse($firstItem['client_start_time'] ?? '00:00');
+    $clientItems = $clientItems->map(function ($item) use ($startTime) {
+        $time = Carbon::parse($item['client_start_time'] ?? '00:00');
+        if ($time->lt($startTime)) {
+            $time = $time->addDay();
+        }
+        $item['_sort_time'] = $time;
+        return $item;
+    })->sortBy('_sort_time')->map(function ($item) {
+        unset($item['_sort_time']);
+        return $item;
+    })->values();
+
+    $record = $clientItems->first();
+
+    if ($clientItems->count() <= 1) {
+        // Remove the client from the select and clear its detail entry
+        $this->data['client_section']['client_id'] = array_values(
+            array_filter($this->data['client_section']['client_id'] ?? [], fn($id) => (int) $id !== $clientId)
+        );
+        $this->data['client_section']['client_details'] = collect($details)
+            ->filter(fn($d) => (int) ($d['client_id'] ?? 0) !== $clientId)
+            ->values()
+            ->toArray();
+    } else {
+        // Redistribute time across (count - 1) sections — exact same logic as delete button
+        $totalStart = Carbon::parse($clientItems->first()['client_start_time']);
+        $totalEnd   = Carbon::parse($clientItems->last()['client_end_time']);
+
+        $anySpansMidnight = false;
+        foreach ($clientItems as $item) {
+            if (!empty($item['client_start_time']) && !empty($item['client_end_time'])) {
+                try {
+                    $s = Carbon::parse($item['client_start_time']);
+                    $e = Carbon::parse($item['client_end_time']);
+                    if ($s->greaterThan($e)) { $anySpansMidnight = true; break; }
+                } catch (\Exception $ex) {
+                    if ($item['client_start_time'] > $item['client_end_time']) { $anySpansMidnight = true; break; }
+                }
+            }
+        }
+
+        if ($anySpansMidnight) {
+            $originalStart = $record['client_start_time'];
+            $originalEnd   = $record['client_end_time'];
+            if ($originalStart && $originalEnd) {
+                try {
+                    $s = Carbon::parse($originalStart);
+                    $e = Carbon::parse($originalEnd);
+                    if ($s->greaterThan($e)) {
+                        $totalStart = $s;
+                        $totalEnd   = $e->copy()->addDay();
+                    }
+                } catch (\Exception $ex) {
+                    if ($originalStart > $originalEnd) {
+                        $totalStart = Carbon::parse($originalStart);
+                        $totalEnd   = Carbon::parse($originalEnd)->addDay();
+                    }
+                }
+            }
+        }
+
+        $numSections    = $clientItems->count() - 1;
+        $sectionMinutes = $totalStart->diffInMinutes($totalEnd) / $numSections;
+        $currentStart   = $totalStart;
+        $newClientItems = [];
+
+        for ($i = 0; $i < $numSections; $i++) {
+            $currentEnd       = $currentStart->copy()->addMinutes($sectionMinutes);
+            $newClientItems[] = [
+                'client_id'         => $clientId,
+                'client_name'       => $record['client_name'] ?? '',
+                'client_start_time' => $currentStart->format('H:i'),
+                'client_end_time'   => $currentEnd->format('H:i'),
+                'price_book_id'     => \App\Models\PriceBook::where('id', $record['price_book_id'] ?? null)->value('id'),
+                'hours'             => $record['hours'] ?? '1:1',
+            ];
+            $currentStart = $currentEnd;
+        }
+
+        $otherDetails = collect($details)
+            ->filter(fn($d) => (int) ($d['client_id'] ?? 0) !== $clientId)
+            ->values()
+            ->toArray();
+
+        $this->data['client_section']['client_details'] = array_merge($otherDetails, $newClientItems);
+    }
+}
+
 public function close()
 {
     // Get the start date from the form data
@@ -139,8 +238,29 @@ public function close()
                                 ->schema([
                                     Grid::make(3)
                                         ->schema([
+                                            View::make('client-multi-select-custom')
+                                                ->view('filament.forms.components.client-multi-select')
+                                                ->viewData(fn ($get) => [
+                                                    'wirePath'        => 'data.client_section.client_id',
+                                                    'selectedDetails' => collect($get('client_details') ?? [])
+                                                        ->filter(fn($d) => !empty($d['client_id']))
+                                                        ->values()
+                                                        ->toArray(),
+                                                    'availableClients' => Client::where('user_id', auth()->id())
+                                                        ->where('is_archive', 'Unarchive')
+                                                        ->pluck('display_name', 'id')
+                                                        ->toArray(),
+                                                    'selectedIds' => collect($get('client_details') ?? [])
+                                                        ->pluck('client_id')
+                                                        ->filter()
+                                                        ->unique()
+                                                        ->values()
+                                                        ->toArray(),
+                                                ])
+                                                ->columnSpanFull(),
+
                                             Select::make('client_id')
-                                                    ->label('Select Clients')
+                                                    ->label('')
                                                     ->searchable()
                                                     ->placeholder('Type to search clients by name.')
                                                     ->columnSpanFull()
@@ -151,29 +271,46 @@ public function close()
                                                     )
                                                     ->multiple()
                                                     ->preload()
-                                              
                                                     ->live()
-                                                ->afterStateUpdated(function ($state, $set) {
-                                                    if (!empty($state)) {
-                                                        $clients = Client::whereIn('id', $state)->get();
+                                                    ->afterStateUpdated(function ($state, $set, $get) {
+                                                        $state = $state ?? [];
+                                                        $currentDetails = $get('client_details') ?? [];
 
-                                                        $details = [];
-                                                        $clientIndex = 1;
-                                                        foreach ($clients as $client) {
-                                                            $details[] = [
-                                                                'client_id' => $client->id,
-                                                                'client_name' => $client->display_name,
-                                                                'hours' => '1:' . $clientIndex,
-                                                            ];
-                                                            $clientIndex++;
+                                                        $currentClientIds = collect($currentDetails)
+                                                            ->pluck('client_id')
+                                                            ->unique()
+                                                            ->map(fn($id) => (int) $id)
+                                                            ->values()
+                                                            ->toArray();
+
+                                                        $newClientIds = array_map('intval', $state);
+
+                                                        $addedIds   = array_diff($newClientIds, $currentClientIds);
+                                                        $removedIds = array_diff($currentClientIds, $newClientIds);
+
+                                                        $details = $currentDetails;
+
+                                                        foreach ($addedIds as $clientId) {
+                                                            $client = Client::find($clientId);
+                                                            if ($client) {
+                                                                $details[] = [
+                                                                    'client_id'   => $client->id,
+                                                                    'client_name' => $client->display_name,
+                                                                    'hours'       => '1:1',
+                                                                ];
+                                                            }
                                                         }
 
-                                                        $set('client_details', $details);
-                                                    } else {
-                                                        $set('client_details', []);
-                                                    }
-                                                }),
-                          
+                                                        foreach ($removedIds as $clientId) {
+                                                            $details = collect($details)
+                                                                ->reject(fn($item) => (int) ($item['client_id'] ?? 0) === (int) $clientId)
+                                                                ->values()
+                                                                ->all();
+                                                        }
+
+                                                        $set('client_details', array_values($details));
+                                                    })
+                                                    ->extraAttributes(['style' => 'display:none!important;']),
 
 Repeater::make('client_details')
     ->label(fn ($get, $state) => $get('client_name'))
@@ -1091,14 +1228,14 @@ Repeater::make('client_details')
                                                             ->label('')
                                                             ->seconds(false)
                                                             ->default('02:00 AM')
-                                                            ->extraInputAttributes(['id' => 'user-start-time-input'])
+                                                            ->extraInputAttributes(fn ($get) => ['id' => 'adv-user-start-time-input-' . ($get('user_id') ?? 'default')])
                                                             ->columnSpan(2),
 
                                                         TimePicker::make('user_end_time')
                                                             ->label('')
                                                             ->seconds(false)
                                                             ->default('03:00 AM')
-                                                            ->extraInputAttributes(['id' => 'user-end-time-input'])
+                                                            ->extraInputAttributes(fn ($get) => ['id' => 'adv-user-end-time-input-' . ($get('user_id') ?? 'default')])
                                                             ->columnSpan(2),
 
                                                        
@@ -1117,13 +1254,13 @@ Repeater::make('client_details')
                                                                     ->toArray();
                                                             })
                                                             ->columnSpan(5),
-                                                                View::make('user-start-time-init')
+                                                                View::make('adv-user-start-time-init')
                                                                     ->view('filament.forms.components.time-js-initializer')
-                                                                    ->viewData(['fieldId' => 'user-start-time-input']),
+                                                                    ->viewData(fn ($get) => ['fieldId' => 'adv-user-start-time-input-' . ($get('user_id') ?? 'default')]),
 
-                                                                View::make('user-start-time-init')
-                                                                ->view('filament.forms.components.time-js-initializer')
-                                                                ->viewData(['fieldId' => 'user-end-time-input']),
+                                                                View::make('adv-user-end-time-init')
+                                                                    ->view('filament.forms.components.time-js-initializer')
+                                                                    ->viewData(fn ($get) => ['fieldId' => 'adv-user-end-time-input-' . ($get('user_id') ?? 'default')]),
                                                       
 
                                                         ]),
